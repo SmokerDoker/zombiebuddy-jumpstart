@@ -9,6 +9,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 
 import me.zed_0xff.zombie_buddy.transformers.TransformedJar;
 import net.bytebuddy.agent.builder.AgentBuilder;
@@ -27,11 +29,17 @@ import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
  * when it was loaded (Lua exposures, event handlers, files) stays as it is. Mods with
  * MethodDelegation patches, and every mod when hotswap is off, keep their patches until restart.
  *
+ * <p>{@link #load} adds a mod jar that was not loaded at start. It only loads a jar whose SHA-256 is
+ * approved in mod_approvals.json (written by ZombieBuddy's own prompt, by BiteCheck or by
+ * Jumpstart); there is no prompt at runtime. A jar whose classes are already defined, for example
+ * a newer version of a mod loaded at start, is refused: its classes would not replace the old ones.
+ *
  * <p>From Lua (debug console):
  * <pre>
  *   print(ZombieBuddy.Hotswap.status())
  *   print(ZombieBuddy.Hotswap.off("ZBHelloWorld"))
  *   print(ZombieBuddy.Hotswap.on("ZBHelloWorld"))
+ *   print(ZombieBuddy.Hotswap.loadJar("C:/.../MyMod.jar", "com.example.mymod", "MyMod"))
  * </pre>
  */
 @Exposer.LuaClass(name = "ZombieBuddy.Hotswap")
@@ -53,6 +61,12 @@ public final class Hotswap {
     /** Lua: switches a mod back on that was switched off with {@link #off}. Returns a one-line result. */
     public static synchronized String on(String mod) {
         return forEachJar(mod, false);
+    }
+
+    /** Lua: loads a mod jar that was not loaded at start. Returns a one-line result. */
+    public static synchronized String loadJar(String jarPath, String packageName, String modId) {
+        String problem = Utils.isBlank(jarPath) ? "no jar path" : load(Path.of(jarPath), packageName, modId);
+        return problem == null ? "OK " + modId + " loaded" : "FAILED " + modId + ": " + problem;
     }
 
     /** Lua: one line per loaded Java mod jar: on/off, switchable or not. */
@@ -104,6 +118,94 @@ public final class Hotswap {
         g_switchedOff.remove(jar);
         Logger.info("hotswap: switched on " + jar);
         return handle.isComplete() ? null : "on, but some classes could not be patched (see log)";
+    }
+
+    /**
+     * Loads a mod jar that was not loaded at start and applies its patches (switchable, like every
+     * jar with hotswap on). Runs the mod's Main class like a normal load. Returns null on success,
+     * otherwise why nothing was loaded.
+     */
+    public static synchronized String load(Path jarPath, String packageName, String modId) {
+        if (!isEnabled()) {
+            return "hotswap is off (start with hotswap=true)";
+        }
+        if (Utils.isBlank(packageName)) {
+            return "no Java package name";
+        }
+        if (jarPath == null || !Files.isRegularFile(jarPath)) {
+            return "jar not found: " + jarPath;
+        }
+        Path jar = realPath(jarPath);
+        if (Loader.g_mod_loaders.containsKey(jar)) {
+            return "already loaded in this session; use off/on";
+        }
+
+        String hash = Utils.sha256Hex(jar);
+        if (hash == null) {
+            return "cannot hash jar";
+        }
+        Boolean decision = approvalOnDisk(hash);
+        if (Boolean.FALSE.equals(decision)) {
+            return "denied in mod_approvals.json (sha256 " + hash + ")";
+        }
+        if (decision == null) {
+            return "not approved: mod_approvals.json has no allow decision for sha256 " + hash;
+        }
+
+        String clash;
+        try {
+            clash = firstAlreadyDefinedClass(jar);
+        } catch (IOException e) {
+            return "cannot read jar: " + e.getMessage();
+        }
+        if (clash != null) {
+            return "class " + clash + " is already defined (another version of this mod?); restart to load this jar";
+        }
+
+        // loadJar re-checks the hash right before it reads the jar, so a swapped file is refused.
+        if (!Loader.loadJar(jar, packageName, hash, Loader.Phase.MAIN)) {
+            return "ZombieBuddy could not load it (see log)";
+        }
+        String id = Utils.isBlank(modId) ? jar.getFileName().toString() : modId;
+        Loader.g_jarLoadStatus.put(jar, new Loader.JavaModLoadState(
+            id, jar, new ModFlags(ModFlags.MF_ACTIVE), "loaded live", hash, Boolean.TRUE));
+        Logger.info("hotswap: loaded " + id + " from " + jar);
+
+        PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(jar);
+        return handle == null || handle.isComplete() ? null : "loaded, but some classes could not be patched (see log)";
+    }
+
+    /** Reads mod_approvals.json again: BiteCheck or Jumpstart may have written to it since start. */
+    private static Boolean approvalOnDisk(String sha256) {
+        Boolean decision = null;
+        for (ModApprovalsStore.ModEntry entry : ModApprovalsStore.load().mods) {
+            if (entry != null && sha256.equals(entry.jarHash)) {
+                if (!entry.decision) {
+                    return Boolean.FALSE; // a deny anywhere wins
+                }
+                decision = Boolean.TRUE;
+            }
+        }
+        return decision;
+    }
+
+    /** A class from the jar that the JVM already has, or null. Checks names only, loads nothing. */
+    private static String firstAlreadyDefinedClass(Path jar) throws IOException {
+        Set<String> inJar = new java.util.HashSet<>();
+        try (JarFile jf = new JarFile(jar.toFile())) {
+            for (JarEntry entry : java.util.Collections.list(jf.entries())) {
+                String name = entry.getName();
+                if (name.endsWith(".class") && !name.startsWith("META-INF/") && !name.endsWith("module-info.class")) {
+                    inJar.add(name.substring(0, name.length() - ".class".length()).replace('/', '.'));
+                }
+            }
+        }
+        for (Class<?> loaded : Loader.g_instrumentation.getAllLoadedClasses()) {
+            if (inJar.contains(loaded.getName())) {
+                return loaded.getName();
+            }
+        }
+        return null;
     }
 
     private static String forEachJar(String mod, boolean off) {

@@ -250,6 +250,13 @@ sourceSets {
         }
         compileClasspath += main.output
     }
+    hotswaplive {
+        java {
+            srcDirs = ['hotswaplive']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
     testHotswap {
         java {
             srcDirs = ['test_hotswap']
@@ -449,6 +456,13 @@ task hotswappatchesJar(type: Jar) {
     dependsOn compileHotswappatchesJava
 }
 
+// Jumpstart fork: JAR loaded at runtime by the live-load test
+task hotswapliveJar(type: Jar) {
+    archiveBaseName.set("hotswaplive")
+    from sourceSets.hotswaplive.output
+    dependsOn compileHotswapliveJava
+}
+
 // Add testjar JAR as test dependency
 dependencies {
     testImplementation files(tasks.named('testJar'))
@@ -554,6 +568,7 @@ task test_hotswap(type: Test) {
     useJUnitPlatform()
     dependsOn testJar
     dependsOn hotswappatchesJar
+    dependsOn hotswapliveJar
     dependsOn shadowJar
 
     testClassesDirs = sourceSets.testHotswap.output.classesDirs
@@ -562,6 +577,9 @@ task test_hotswap(type: Test) {
     def patchesJarPath = hotswappatchesJar.archiveFile.get().asFile.absolutePath
     def patchesPackageName = "me.zed_0xff.zombie_buddy.hotswappatches"
     systemProperty 'zb.test.hotswapJar', patchesJarPath
+    systemProperty 'zb.test.hotswapLiveJar', hotswapliveJar.archiveFile.get().asFile.absolutePath
+    // Own config dir: the live-load test writes mod_approvals.json there.
+    def hotswapConfigDir = layout.buildDirectory.dir("hotswap-config").get().asFile.absolutePath
 
     doFirst {
         def gsonJar = configurations.runtimeClasspath.find { it.name.contains("gson") }
@@ -569,7 +587,7 @@ task test_hotswap(type: Test) {
         def bcJar = configurations.runtimeClasspath.find { it.name.contains("bcprov") }
         if (!bcJar) throw new GradleException("bouncycastle jar not found in runtimeClasspath")
         jvmArgs "-Xbootclasspath/a:${gsonJar}${File.pathSeparator}${bcJar}"
-        jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${patchesJarPath}:${patchesPackageName},config_dir=.config,prop_prefix=zb,hotswap=true"
+        jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${patchesJarPath}:${patchesPackageName},config_dir=${hotswapConfigDir},prop_prefix=zb,hotswap=true"
     }
 }
 
