@@ -257,6 +257,20 @@ sourceSets {
         }
         compileClasspath += main.output
     }
+    hotswapupdatev1 {
+        java {
+            srcDirs = ['hotswapupdate/v1']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
+    hotswapupdatev2 {
+        java {
+            srcDirs = ['hotswapupdate/v2']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
     testHotswap {
         java {
             srcDirs = ['test_hotswap']
@@ -463,6 +477,18 @@ task hotswapliveJar(type: Jar) {
     dependsOn compileHotswapliveJava
 }
 
+// Jumpstart fork: two versions of one mod for the live-update test
+task hotswapupdateV1Jar(type: Jar) {
+    archiveBaseName.set("hotswapupdate-v1")
+    from sourceSets.hotswapupdatev1.output
+    dependsOn compileHotswapupdatev1Java
+}
+task hotswapupdateV2Jar(type: Jar) {
+    archiveBaseName.set("hotswapupdate-v2")
+    from sourceSets.hotswapupdatev2.output
+    dependsOn compileHotswapupdatev2Java
+}
+
 // Add testjar JAR as test dependency
 dependencies {
     testImplementation files(tasks.named('testJar'))
@@ -569,6 +595,8 @@ task test_hotswap(type: Test) {
     dependsOn testJar
     dependsOn hotswappatchesJar
     dependsOn hotswapliveJar
+    dependsOn hotswapupdateV1Jar
+    dependsOn hotswapupdateV2Jar
     dependsOn shadowJar
 
     testClassesDirs = sourceSets.testHotswap.output.classesDirs
@@ -578,6 +606,8 @@ task test_hotswap(type: Test) {
     def patchesPackageName = "me.zed_0xff.zombie_buddy.hotswappatches"
     systemProperty 'zb.test.hotswapJar', patchesJarPath
     systemProperty 'zb.test.hotswapLiveJar', hotswapliveJar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.hotswapUpdateV1Jar', hotswapupdateV1Jar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.hotswapUpdateV2Jar', hotswapupdateV2Jar.archiveFile.get().asFile.absolutePath
     // Own config dir: the live-load test writes mod_approvals.json there.
     def hotswapConfigDir = layout.buildDirectory.dir("hotswap-config").get().asFile.absolutePath
 

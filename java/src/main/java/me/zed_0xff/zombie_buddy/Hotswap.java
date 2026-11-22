@@ -33,6 +33,8 @@ import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
  * approved in mod_approvals.json (written by ZombieBuddy's own prompt, by BiteCheck or by
  * Jumpstart); there is no prompt at runtime. A jar whose classes are already defined, for example
  * a newer version of a mod loaded at start, is refused: its classes would not replace the old ones.
+ * {@link #update} handles that case: it switches the old version off and loads the new one with
+ * all its classes moved to a fresh package ({@code jsv2.<package>}, {@code jsv3.<package>}, ...).
  *
  * <p>From Lua (debug console):
  * <pre>
@@ -40,11 +42,14 @@ import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
  *   print(ZombieBuddy.Hotswap.off("ZBHelloWorld"))
  *   print(ZombieBuddy.Hotswap.on("ZBHelloWorld"))
  *   print(ZombieBuddy.Hotswap.loadJar("C:/.../MyMod.jar", "com.example.mymod", "MyMod"))
+ *   print(ZombieBuddy.Hotswap.updateJar("C:/.../MyMod-1.1.jar", "com.example.mymod", "MyMod"))
  * </pre>
  */
 @Exposer.LuaClass(name = "ZombieBuddy.Hotswap")
 public final class Hotswap {
     private static final Set<Path> g_switchedOff = ConcurrentHashMap.newKeySet();
+    /** Last version number used per mod package by {@link #update}; the first update is 2. */
+    private static final Map<String, Integer> g_generations = new ConcurrentHashMap<>();
 
     private Hotswap() {}
 
@@ -67,6 +72,12 @@ public final class Hotswap {
     public static synchronized String loadJar(String jarPath, String packageName, String modId) {
         String problem = Utils.isBlank(jarPath) ? "no jar path" : load(Path.of(jarPath), packageName, modId);
         return problem == null ? "OK " + modId + " loaded" : "FAILED " + modId + ": " + problem;
+    }
+
+    /** Lua: replaces the loaded version of a mod with the jar at jarPath. Returns a one-line result. */
+    public static synchronized String updateJar(String jarPath, String packageName, String modId) {
+        String problem = Utils.isBlank(jarPath) ? "no jar path" : update(Path.of(jarPath), packageName, modId);
+        return problem == null ? "OK " + modId + " updated" : "FAILED " + modId + ": " + problem;
     }
 
     /** Lua: one line per loaded Java mod jar: on/off, switchable or not. */
@@ -159,7 +170,7 @@ public final class Hotswap {
             return "cannot read jar: " + e.getMessage();
         }
         if (clash != null) {
-            return "class " + clash + " is already defined (another version of this mod?); restart to load this jar";
+            return "class " + clash + " is already defined (another version of this mod?); use update, or restart";
         }
 
         // loadJar re-checks the hash right before it reads the jar, so a swapped file is refused.
@@ -173,6 +184,108 @@ public final class Hotswap {
 
         PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(jar);
         return handle == null || handle.isComplete() ? null : "loaded, but some classes could not be patched (see log)";
+    }
+
+    /**
+     * Replaces the loaded version of a mod with a new jar while the game runs. The new jar must be
+     * approved in mod_approvals.json, and every loaded jar of the mod must be switchable. Its classes
+     * are moved from packageName to a fresh package so they do not clash with the old version; the
+     * old version is switched off first and switched on again if the new one fails to load. The
+     * new version's Main class runs like at a normal load. Returns null on success, otherwise why.
+     */
+    public static synchronized String update(Path jarPath, String packageName, String modId) {
+        if (!isEnabled()) {
+            return "hotswap is off (start with hotswap=true)";
+        }
+        if (Utils.isBlank(packageName) || Utils.isBlank(modId)) {
+            return "need the mod id and its Java package name";
+        }
+        if (jarPath == null || !Files.isRegularFile(jarPath)) {
+            return "jar not found: " + jarPath;
+        }
+        Path jar = realPath(jarPath);
+
+        List<Path> oldJars = new ArrayList<>();
+        for (Path candidate : resolve(modId)) {
+            if (Loader.g_patch_handles.containsKey(candidate)) {
+                oldJars.add(candidate);
+            }
+        }
+        if (oldJars.isEmpty()) {
+            return "no loaded version of " + modId + " to replace; use load";
+        }
+        for (Path old : oldJars) {
+            PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(old);
+            if (!handle.isSwitchable()) {
+                return old.getFileName() + " cannot be switched off (MethodDelegation, or loaded without hotswap); restart";
+            }
+        }
+
+        // Read once: the approved hash and the loaded bytes are the same bytes.
+        byte[] original;
+        try {
+            original = Files.readAllBytes(jar);
+        } catch (IOException e) {
+            return "cannot read jar: " + e.getMessage();
+        }
+        String hash = Utils.sha256Hex(original);
+        Boolean decision = approvalOnDisk(hash);
+        if (!Boolean.TRUE.equals(decision)) {
+            return Boolean.FALSE.equals(decision)
+                ? "denied in mod_approvals.json (sha256 " + hash + ")"
+                : "not approved: mod_approvals.json has no allow decision for sha256 " + hash;
+        }
+
+        int generation = g_generations.merge(packageName, 2, (prev, ignored) -> prev + 1);
+        String newPackage = "jsv" + generation + "." + packageName;
+        byte[] relocated;
+        try {
+            relocated = JarRelocator.relocate(original, packageName, newPackage);
+        } catch (IOException | RuntimeException e) {
+            return "cannot move the new version to package " + newPackage + ": " + e;
+        }
+
+        List<Path> switchedOff = new ArrayList<>();
+        for (Path old : oldJars) {
+            String problem = switchOff(old);
+            if (problem != null) {
+                switchOnAgain(switchedOff);
+                return "could not switch off " + old.getFileName() + ": " + problem;
+            }
+            switchedOff.add(old);
+        }
+
+        Path key = Path.of(jar + "#" + newPackage);
+        boolean loaded;
+        try {
+            loaded = Loader.transformAndLoadJar(key, newPackage, Loader.Phase.MAIN, relocated);
+        } catch (RuntimeException e) {
+            Logger.error("hotswap: loading the new version of " + modId + " failed: " + e);
+            loaded = false;
+        }
+        if (!loaded) {
+            switchOnAgain(switchedOff);
+            return "the new version could not be loaded (see log); the old version is on again";
+        }
+
+        for (Path old : oldJars) {
+            Loader.g_jarLoadStatus.remove(old);
+        }
+        Loader.g_jarLoadStatus.put(key, new Loader.JavaModLoadState(
+            modId, key, new ModFlags(ModFlags.MF_ACTIVE), "updated live", hash, Boolean.TRUE));
+        Logger.info("hotswap: updated " + modId + " to " + jar + " as package " + newPackage);
+
+        PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(key);
+        return handle == null || handle.isComplete() ? null : "updated, but some classes could not be patched (see log)";
+    }
+
+    private static void switchOnAgain(List<Path> jars) {
+        for (Path jar : jars) {
+            String problem = switchOn(jar);
+            if (problem != null) {
+                Logger.error("hotswap: could not switch " + jar + " on again: " + problem);
+            }
+        }
     }
 
     /** Reads mod_approvals.json again: BiteCheck or Jumpstart may have written to it since start. */

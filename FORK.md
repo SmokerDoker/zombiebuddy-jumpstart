@@ -14,9 +14,10 @@ ZombieBuddy works unchanged; mod_approvals.json, agent options and the mod API s
 | Agent option `hotswap=true`: Advice-only mod jars get one retransformable transformer that does not change the class format, for loaded and not-yet-loaded classes | `PatchEngine.java` |
 | `Hotswap`: switch a mod's patches off and on at runtime, also from Lua as `ZombieBuddy.Hotswap` | `Hotswap.java` |
 | `Hotswap.load` (Lua: `loadJar`): load a mod jar at runtime, only if mod_approvals.json allows its SHA-256 | `Hotswap.java` |
+| `Hotswap.update` (Lua: `updateJar`): replace a loaded mod with a new version; the new classes are moved to package `jsv<n>.<package>` so they do not clash with the old ones | `Hotswap.java`, `JarRelocator.java` |
 | No self-update from an upstream, Zed-signed ZombieBuddy.jar, so the fork is not silently replaced | `SelfUpdater.java`, `ForkInfo.java` |
 | Version string says "Jumpstart fork" (log, watermark) | `ZombieBuddy.java` |
-| Test `test_hotswap`: a patch on a class loaded after premain, switched off and on 50 times; a jar loaded at runtime only after approval | `build.gradle`, `hotswappatches/`, `hotswaplive/`, `test_hotswap/`, `testjar/src/testjar/Hotswap*Target.java` |
+| Test `test_hotswap`: a patch on a class loaded after premain, switched off and on 50 times; a jar loaded at runtime only after approval; a mod updated v1 → v2 → v1 at runtime | `build.gradle`, `hotswappatches/`, `hotswaplive/`, `hotswapupdate/`, `test_hotswap/`, `testjar/src/testjar/Hotswap*Target.java` |
 
 Without `hotswap=true` the fork patches exactly like upstream.
 
@@ -30,6 +31,7 @@ print(ZombieBuddy.Hotswap.status())
 print(ZombieBuddy.Hotswap.off("ZBHelloWorld"))
 print(ZombieBuddy.Hotswap.on("ZBHelloWorld"))
 print(ZombieBuddy.Hotswap.loadJar("C:/path/to/MyMod.jar", "com.example.mymod", "MyMod"))
+print(ZombieBuddy.Hotswap.updateJar("C:/path/to/MyMod-1.1.jar", "com.example.mymod", "MyMod"))
 ```
 
 Step-by-step test: [TESTING.md](TESTING.md). CI proposal: [tools/ci](tools/ci/README.md).
@@ -41,9 +43,13 @@ Step-by-step test: [TESTING.md](TESTING.md). CI proposal: [tools/ci](tools/ci/RE
 - Mods with MethodDelegation patches keep their patches until restart.
 - With `hotswap=true`, an Advice patch that needs to change the class format (rare) cannot be
   applied; the log says which class, and `status()` shows the mod as incomplete.
-- An updated jar cannot be loaded live yet: regular mod jars are defined in ZombieBuddy's class
-  loader, so a second version with the same class names would not replace the first.
-  `Hotswap.load` refuses that case.
+- Regular mod jars are defined in ZombieBuddy's class loader, so a second version with the same
+  class names cannot be loaded next to the first. `Hotswap.load` refuses that case;
+  `Hotswap.update` moves the new version's classes to `jsv<n>.<package>` instead. Class names a
+  mod builds as strings (for example for `Class.forName`) are not moved, and the old version's
+  classes and static state stay in memory until restart.
+- `update` runs the new version's `Main` class. Whatever the old `main()` registered (Lua events,
+  exposures) is not undone; that is Jumpstart's job.
 - `Hotswap.load` never prompts. Approve the jar first (ZombieBuddy's dialog at a normal start,
   BiteCheck, or Jumpstart writing mod_approvals.json).
 
