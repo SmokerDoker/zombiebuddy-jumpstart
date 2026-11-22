@@ -1,0 +1,53 @@
+# Jumpstart fork: builds ZombieBuddy and runs its tests, including test_hotswap.
+# projectzomboid.jar comes from the Project Zomboid dedicated server (Steam app 380870, anonymous
+# login) via DepotDownloader, the same way BiteCheck's CI gets it.
+name: Jumpstart build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.8.2"
+
+      - name: Download projectzomboid.jar (dedicated server, public branch)
+        env:
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+        run: |
+          set -euo pipefail
+          dd="$(bash .github/scripts/depotdownloader.sh)"
+          tool="$(dirname "$dd")"
+          dir="$RUNNER_TEMP/pz-server"
+          mkdir -p "$dir"
+          printf '%s\n' 'java/projectzomboid.jar' 'regex:projectzomboid\.jar$' > "$tool/files.txt"
+          for attempt in 1 2 3; do
+            if "$dd" -app 380870 -os linux -osarch 64 -filelist "$tool/files.txt" -dir "$dir" > "$RUNNER_TEMP/dd.log" 2>&1 \
+               && [ -f "$dir/java/projectzomboid.jar" ]; then
+              break
+            fi
+            tail -n 20 "$RUNNER_TEMP/dd.log"
+            echo "::warning::download attempt $attempt failed, retrying"
+            sleep 15
+          done
+          test -f "$dir/java/projectzomboid.jar"
+          echo "PZ_JAR=$dir/java/projectzomboid.jar" >> "$GITHUB_ENV"
+
+      - name: Build and test
+        working-directory: java
+        run: gradle --no-daemon --continue "-PgameClasspath=$PZ_JAR" unitTest test_vanilla test_patched test_hotswap
