@@ -85,6 +85,41 @@ public final class Hotswap {
         return problem == null ? "OK " + modId + " updated" : "FAILED " + modId + ": " + problem;
     }
 
+    /**
+     * Lua: the state of a mod (id or jar path): "on", "on, until restart", "off" or "not loaded".
+     * With several jars (a mod with libraries, or old versions after an update), the most "on" wins.
+     */
+    public static synchronized String stateOf(String mod) {
+        String best = "not loaded";
+        for (Path jar : resolve(mod)) {
+            String state;
+            if (g_switchedOff.contains(jar)) {
+                state = "off";
+            } else {
+                PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(jar);
+                if (handle == null && !Loader.g_mod_loaders.containsKey(jar)) {
+                    continue; // known to ZombieBuddy, but skipped or denied
+                }
+                state = handle == null || !handle.isSwitchable() ? "on, until restart" : "on";
+            }
+            if (STATE_RANK.indexOf(state) > STATE_RANK.indexOf(best)) {
+                best = state;
+            }
+        }
+        return best;
+    }
+
+    private static final List<String> STATE_RANK = List.of("not loaded", "off", "on, until restart", "on");
+
+    /**
+     * Lua (Jumpstart's mod list): the Java part of a mod folder exactly as ZombieBuddy would load it,
+     * as "jar path TAB package", or "" when the mod has none that fits this ZombieBuddy and side.
+     */
+    public static String javaModOf(String commonDir, String versionDir) {
+        JavaModInfo info = JavaModInfo.parseMerged(commonDir, versionDir);
+        return info == null ? "" : info.jarPath().toAbsolutePath() + "\t" + info.javaPkgName();
+    }
+
     /** Lua: one line per loaded Java mod jar: on/off, switchable or not. */
     public static synchronized String status() {
         StringBuilder sb = new StringBuilder("hotswap " + (isEnabled() ? "on" : "off (start with hotswap=true)"));

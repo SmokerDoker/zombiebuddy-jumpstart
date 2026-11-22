@@ -42,6 +42,7 @@ public class HotswapUpdateTest {
 
         assertNull(Hotswap.update(v2, PACKAGE, MOD));
         assertEquals("vanilla +v2", target.greet());
+        assertEquals("on", Hotswap.stateOf(MOD), "the new version counts, not the old one that is off");
 
         assertEquals("OK " + MOD + " off", Hotswap.off(MOD));
         assertEquals("vanilla", target.greet());

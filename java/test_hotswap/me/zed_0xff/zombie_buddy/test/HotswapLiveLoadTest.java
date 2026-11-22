@@ -36,13 +36,16 @@ public class HotswapLiveLoadTest {
         assertEquals("vanilla", target.greet(), "refused jar must not patch anything");
 
         writeApprovals("{\"id\": \"HotswapLive\", \"jar_hash\": \"" + hash + "\", \"decision\": true}");
+        assertEquals("not loaded", Hotswap.stateOf("HotswapLive"));
         assertNull(Hotswap.load(jar, PACKAGE, "HotswapLive"));
         assertEquals("vanilla +live", target.greet());
+        assertEquals("on", Hotswap.stateOf("HotswapLive"));
 
         assertEquals("already loaded in this session; use off/on", Hotswap.load(jar, PACKAGE, "HotswapLive"));
 
         assertEquals("OK HotswapLive off", Hotswap.off("HotswapLive"));
         assertEquals("vanilla", target.greet());
+        assertEquals("off", Hotswap.stateOf("HotswapLive"));
         assertEquals("OK HotswapLive on", Hotswap.on("HotswapLive"));
         assertEquals("vanilla +live", target.greet());
     }
