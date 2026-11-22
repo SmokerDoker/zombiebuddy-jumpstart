@@ -38,11 +38,13 @@ The jar is `java\build\jdk25\libs\zombiebuddy-jumpstart.jar`. `shadowJar` takes 
 ## 2. Install
 
 ```powershell
-.\tools\install-dev.ps1 -WithHelloWorld
+.\tools\install-dev.ps1 -WithHelloWorld -LuaConsole
 ```
 
 This backs up `ZombieBuddy.jar` and `ProjectZomboid64.json`, puts the fork jar in place, adds
-`hotswap=true` to the `zbNative` agent options and clones ZBHelloWorld into your mods folder.
+`hotswap=true,hotswap_lua=true` to the `zbNative` agent options and clones ZBHelloWorld into your mods
+folder. `hotswap_lua=true` lets the Lua console below switch mods; without `-LuaConsole` Lua may only
+read the state (`status`, `stateOf`), because Lua mods are not checked by anyone.
 Add `-debug` to the Steam launch options to get the Lua console.
 
 ## 3. Test

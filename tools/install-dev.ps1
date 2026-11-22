@@ -7,6 +7,8 @@
     - backs up ZombieBuddy.jar as ZombieBuddy.jar.upstream-backup (once; an existing backup is kept)
     - copies the fork jar from java\build\jdk25\libs over ZombieBuddy.jar
     - backs up ProjectZomboid64.json and changes "-agentlib:zbNative" to "-agentlib:zbNative=hotswap=true"
+    - with -LuaConsole: also hotswap_lua=true, so the Lua console may switch mods (manual tests only;
+      without it Lua can only read the state)
     - with -WithHelloWorld: clones zed-0xff/ZBHelloWorld into %USERPROFILE%\Zomboid\mods\ZBHelloWorld
   -Uninstall restores both backups.
 
@@ -14,13 +16,14 @@
   upstream jar back; run this script again after either.
 
 .EXAMPLE
-  .\tools\install-dev.ps1 -WithHelloWorld
+  .\tools\install-dev.ps1 -WithHelloWorld -LuaConsole
   .\tools\install-dev.ps1 -Uninstall
 #>
 param(
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid",
     [string]$Jar = (Join-Path $PSScriptRoot "..\java\build\jdk25\libs\zombiebuddy-jumpstart.jar"),
     [switch]$WithHelloWorld,
+    [switch]$LuaConsole,
     [switch]$Uninstall
 )
 
@@ -31,7 +34,7 @@ $zbBackup   = "$zbJar.upstream-backup"
 $json       = Join-Path $GameDir "ProjectZomboid64.json"
 $jsonBackup = "$json.upstream-backup"
 $plainArg   = '"-agentlib:zbNative"'
-$hotswapArg = '"-agentlib:zbNative=hotswap=true"'
+$hotswapArg = $(if ($LuaConsole) { '"-agentlib:zbNative=hotswap=true,hotswap_lua=true"' } else { '"-agentlib:zbNative=hotswap=true"' })
 
 if (-not (Test-Path $GameDir)) { throw "Project Zomboid not found at $GameDir (use -GameDir)" }
 
@@ -52,7 +55,10 @@ Copy-Item $Jar $zbJar -Force
 
 $text = Get-Content $json -Raw
 if ($text.Contains($hotswapArg)) {
-    "ProjectZomboid64.json already has hotswap=true"
+    "ProjectZomboid64.json already has $hotswapArg"
+} elseif ($text -match '"-agentlib:zbNative=hotswap=true[^"]*"') {
+    [System.IO.File]::WriteAllText($json, ($text -replace '"-agentlib:zbNative=hotswap=true[^"]*"', $hotswapArg))
+    "ProjectZomboid64.json: agent options now $hotswapArg"
 } elseif ($text.Contains($plainArg)) {
     if (-not (Test-Path $jsonBackup)) { Copy-Item $json $jsonBackup; "backed up ProjectZomboid64.json" }
     [System.IO.File]::WriteAllText($json, $text.Replace($plainArg, $hotswapArg))

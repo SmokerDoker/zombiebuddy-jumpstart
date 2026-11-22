@@ -32,7 +32,7 @@ if (-not (Test-Path "$t\mods\ZBHelloWorld")) {
 Copy-Item (Resolve-Path $Jar) "$t\ZombieBuddy-fork.jar" -Force
 $modsTxt = "VERSION = 1,`r`n`r`nmods`r`n{`r`n    mod = ZombieBuddy,`r`n    mod = ZBHelloWorld,`r`n}`r`n`r`nmaps`r`n{`r`n}`r`n"
 [IO.File]::WriteAllText("$t\mods\default.txt", $modsTxt)
-$agent = "-javaagent:$t\ZombieBuddy-fork.jar=hotswap=true,experimental,lua_server_port=4444,policy=deny-new,config_dir=$t\.zombie_buddy"
+$agent = "-javaagent:$t\ZombieBuddy-fork.jar=hotswap=true,hotswap_lua=true,experimental,lua_server_port=4444,policy=deny-new,config_dir=$t\.zombie_buddy"
 $startCmd = "@echo off`r`ncd /d `"$GameDir`"`r`n`".\jre64\bin\java.exe`" $agent -Djava.awt.headless=true --enable-native-access=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dzomboid.steam=1 -Dzomboid.znetlog=1 -XX:-CreateCoredumpOnCrash -XX:-OmitStackTraceInFastThrow -XX:+UseZGC -Xmx6000m -Djava.library.path=./win64/;./ -cp ./;projectzomboid.jar zombie.gameStates.MainScreenState -cachedir=$t > `"$t\game-out.txt`" 2>&1`r`n"
 [IO.File]::WriteAllText("$t\start-test.cmd", $startCmd)
 

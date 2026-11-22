@@ -12,7 +12,7 @@ ZombieBuddy works unchanged; mod_approvals.json, agent options and the mod API s
 | --- | --- |
 | `PatchEngine.applyPatches` returns a `PatchHandle` instead of discarding the installed transformers | `PatchEngine.java`, `Loader.java` |
 | Agent option `hotswap=true`: Advice-only mod jars get one retransformable transformer that does not change the class format, for loaded and not-yet-loaded classes | `PatchEngine.java` |
-| `Hotswap`: switch a mod's patches off and on at runtime, also from Lua as `ZombieBuddy.Hotswap` | `Hotswap.java` |
+| `Hotswap`: switch a mod's patches off and on at runtime. Lua (`ZombieBuddy.Hotswap`) may only read the state; switching, loading and updating from Lua needs the agent option `hotswap_lua=true` (tests), because Lua mods are not checked | `Hotswap.java`, `HotswapLua.java` |
 | `Hotswap.load` (Lua: `loadJar`): load a mod jar at runtime, only if mod_approvals.json allows its SHA-256 | `Hotswap.java` |
 | `Hotswap.update` (Lua: `updateJar`): replace a loaded mod with a new version; the new classes are moved to package `jsv<n>.<package>` so they do not clash with the old ones | `Hotswap.java`, `JarRelocator.java` |
 | `Hotswap.classHasString` (Lua too): does the bytecode a loaded class runs right now contain a string; used to check that a patch is in or out | `Hotswap.java` |
@@ -26,7 +26,7 @@ Without `hotswap=true` the fork patches exactly like upstream.
 ## Try it in the game
 
 Add `hotswap=true` to the agent options, for example
-`-javaagent:ZombieBuddy.jar=hotswap=true --`, then in the debug console:
+`-javaagent:ZombieBuddy.jar=hotswap=true,hotswap_lua=true --` (the second option only for trying it from Lua), then in the debug console:
 
 ```lua
 print(ZombieBuddy.Hotswap.status())

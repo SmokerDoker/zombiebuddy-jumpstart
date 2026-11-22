@@ -41,16 +41,9 @@ import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
  * {@link #update} handles that case: it switches the old version off and loads the new one with
  * all its classes moved to a fresh package ({@code jsv2.<package>}, {@code jsv3.<package>}, ...).
  *
- * <p>From Lua (debug console):
- * <pre>
- *   print(ZombieBuddy.Hotswap.status())
- *   print(ZombieBuddy.Hotswap.off("ZBHelloWorld"))
- *   print(ZombieBuddy.Hotswap.on("ZBHelloWorld"))
- *   print(ZombieBuddy.Hotswap.loadJar("C:/.../MyMod.jar", "com.example.mymod", "MyMod"))
- *   print(ZombieBuddy.Hotswap.updateJar("C:/.../MyMod-1.1.jar", "com.example.mymod", "MyMod"))
- * </pre>
+ * <p>Lua sees this class only through {@link HotswapLua}: there it can read the state, and change
+ * it only when the game was started with the agent option {@code hotswap_lua=true} (tests).
  */
-@Exposer.LuaClass(name = "ZombieBuddy.Hotswap")
 public final class Hotswap {
     private static final Set<Path> g_switchedOff = ConcurrentHashMap.newKeySet();
     /** Last version number used per mod package by {@link #update}; the first update is 2. */
