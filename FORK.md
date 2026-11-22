@@ -13,9 +13,10 @@ ZombieBuddy works unchanged; mod_approvals.json, agent options and the mod API s
 | `PatchEngine.applyPatches` returns a `PatchHandle` instead of discarding the installed transformers | `PatchEngine.java`, `Loader.java` |
 | Agent option `hotswap=true`: Advice-only mod jars get one retransformable transformer that does not change the class format, for loaded and not-yet-loaded classes | `PatchEngine.java` |
 | `Hotswap`: switch a mod's patches off and on at runtime, also from Lua as `ZombieBuddy.Hotswap` | `Hotswap.java` |
+| `Hotswap.load` (Lua: `loadJar`): load a mod jar at runtime, only if mod_approvals.json allows its SHA-256 | `Hotswap.java` |
 | No self-update from an upstream, Zed-signed ZombieBuddy.jar, so the fork is not silently replaced | `SelfUpdater.java`, `ForkInfo.java` |
 | Version string says "Jumpstart fork" (log, watermark) | `ZombieBuddy.java` |
-| Test `test_hotswap`: a patch on a class loaded after premain, switched off and on 50 times | `build.gradle`, `hotswappatches/`, `test_hotswap/`, `testjar/src/testjar/HotswapTarget.java` |
+| Test `test_hotswap`: a patch on a class loaded after premain, switched off and on 50 times; a jar loaded at runtime only after approval | `build.gradle`, `hotswappatches/`, `hotswaplive/`, `test_hotswap/`, `testjar/src/testjar/Hotswap*Target.java` |
 
 Without `hotswap=true` the fork patches exactly like upstream.
 
@@ -28,7 +29,10 @@ Add `hotswap=true` to the agent options, for example
 print(ZombieBuddy.Hotswap.status())
 print(ZombieBuddy.Hotswap.off("ZBHelloWorld"))
 print(ZombieBuddy.Hotswap.on("ZBHelloWorld"))
+print(ZombieBuddy.Hotswap.loadJar("C:/path/to/MyMod.jar", "com.example.mymod", "MyMod"))
 ```
+
+Step-by-step test: [TESTING.md](TESTING.md). CI proposal: [tools/ci](tools/ci/README.md).
 
 ## Limits
 
@@ -39,6 +43,9 @@ print(ZombieBuddy.Hotswap.on("ZBHelloWorld"))
   applied; the log says which class, and `status()` shows the mod as incomplete.
 - An updated jar cannot be loaded live yet: regular mod jars are defined in ZombieBuddy's class
   loader, so a second version with the same class names would not replace the first.
+  `Hotswap.load` refuses that case.
+- `Hotswap.load` never prompts. Approve the jar first (ZombieBuddy's dialog at a normal start,
+  BiteCheck, or Jumpstart writing mod_approvals.json).
 
 ## Building
 
