@@ -381,6 +381,31 @@ record JavaModInfo(
         return validateAndCreate(commonParsed, commonDir.resolve("mod.info"), commonDir, versionDir, false, server);
     }
 
+    /**
+     * Jumpstart fork: the Java part of a B42 mod folder found the way {@link Loader} finds it at
+     * game start (version folder, then common folder, then mod.info in one and the jar in the
+     * other), for the given side. Either folder may be missing.
+     */
+    static JavaModInfo findFor(Path commonDir, Path versionDir, boolean server) {
+        JavaModInfo info = parseFor(versionDir, server);
+        if (info == null) {
+            info = parseFor(commonDir, server);
+        }
+        if (info == null) {
+            info = parseMergedFor(commonDir, versionDir, server);
+        }
+        return info;
+    }
+
+    private static JavaModInfo parseFor(Path modDir, boolean server) {
+        if (modDir == null || !Files.isDirectory(modDir)) {
+            return null;
+        }
+        Path infPath = modDir.resolve("mod.info");
+        ParsedValues parsed = parseModInfoFile(infPath);
+        return parsed == null ? null : validateAndCreate(parsed, infPath, modDir, modDir, false, server);
+    }
+
     static JavaModInfo parseMerged(String commonDirStr, String versionDirStr) {
         if (Utils.isBlank(commonDirStr)) {
             return null;

@@ -109,17 +109,20 @@ public final class Hotswap {
      * as "jar path TAB package", or "" when the mod has none that fits this ZombieBuddy and side.
      */
     public static String javaModOf(String commonDir, String versionDir) {
-        JavaModInfo info = JavaModInfo.parseMerged(commonDir, versionDir);
-        return info == null ? "" : info.jarPath().toAbsolutePath() + "\t" + info.javaPkgName();
+        return describeJavaMod(JavaModInfo.findFor(pathOrNull(commonDir), pathOrNull(versionDir), Utils.isServer()));
     }
 
     /** Jumpstart (multiplayer): the jar a game client loads from a mod folder, also when asked on a server. */
     public static String clientJavaModOf(String commonDir, String versionDir) {
-        if (Utils.isBlank(commonDir) || Utils.isBlank(versionDir)) {
-            return "";
-        }
-        JavaModInfo info = JavaModInfo.parseMergedFor(Path.of(commonDir), Path.of(versionDir), false);
+        return describeJavaMod(JavaModInfo.findFor(pathOrNull(commonDir), pathOrNull(versionDir), false));
+    }
+
+    private static String describeJavaMod(JavaModInfo info) {
         return info == null ? "" : info.jarPath().toAbsolutePath() + "\t" + info.javaPkgName();
+    }
+
+    private static Path pathOrNull(String dir) {
+        return Utils.isBlank(dir) ? null : Path.of(dir);
     }
 
     /** Lua: one line per loaded Java mod jar: on/off, switchable or not. */
