@@ -25,6 +25,11 @@ public class Agent {
         Logger.info("activating " + ZombieBuddy.getFullVersionString());
         Loader.g_instrumentation = inst;
         Reflect.init(inst);
+        try {
+            HostServer.install(inst); // Jumpstart fork: hosted games get ZombieBuddy on their server too
+        } catch (Throwable t) {
+            Logger.error("hosted games: " + t);
+        }
 
         if (!Utils.isBlank(agentArgs)) {
             String[] args = agentArgs.split(",");

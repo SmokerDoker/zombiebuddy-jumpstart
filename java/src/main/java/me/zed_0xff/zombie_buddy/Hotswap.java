@@ -113,6 +113,15 @@ public final class Hotswap {
         return info == null ? "" : info.jarPath().toAbsolutePath() + "\t" + info.javaPkgName();
     }
 
+    /** Jumpstart (multiplayer): the jar a game client loads from a mod folder, also when asked on a server. */
+    public static String clientJavaModOf(String commonDir, String versionDir) {
+        if (Utils.isBlank(commonDir) || Utils.isBlank(versionDir)) {
+            return "";
+        }
+        JavaModInfo info = JavaModInfo.parseMergedFor(Path.of(commonDir), Path.of(versionDir), false);
+        return info == null ? "" : info.jarPath().toAbsolutePath() + "\t" + info.javaPkgName();
+    }
+
     /** Lua: one line per loaded Java mod jar: on/off, switchable or not. */
     public static synchronized String status() {
         StringBuilder sb = new StringBuilder("hotswap " + (isEnabled() ? "on" : "off (start with hotswap=true)"));

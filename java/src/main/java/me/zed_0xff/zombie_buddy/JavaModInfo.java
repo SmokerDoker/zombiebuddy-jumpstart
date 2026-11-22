@@ -152,6 +152,11 @@ record JavaModInfo(
      * Validates parsed values and creates JavaModInfo, or null if invalid.
      */
     private static JavaModInfo validateAndCreate(ParsedValues parsed, Path infPath, Path infDir, Path jarDir, boolean bLogMissingJar) {
+        return validateAndCreate(parsed, infPath, infDir, jarDir, bLogMissingJar, Utils.isServer());
+    }
+
+    /** Jumpstart fork: {@code isServer} chooses the side, so a server can also see its clients' jars. */
+    private static JavaModInfo validateAndCreate(ParsedValues parsed, Path infPath, Path infDir, Path jarDir, boolean bLogMissingJar, boolean isServer) {
         List<JarCandidate> candidates = parsed.jarCandidates();
         String javaPkgName = parsed.javaPkgName();
 
@@ -164,7 +169,6 @@ record JavaModInfo(
             return null;
         }
 
-        boolean isServer = Utils.isServer();
         boolean anyPlatformMatch = false;
         JarCandidate versionMatch = null;
 
@@ -359,6 +363,22 @@ record JavaModInfo(
             return validateAndCreate(verParsed, verModInfoFile, versionDir, commonDir, true);
         }
         return validateAndCreate(commonParsed, commonModInfoFile, commonDir, versionDir, true);
+    }
+
+    /**
+     * Jumpstart fork: like {@link #parseMerged(Path, Path)}, but for the given side (a server asks
+     * which jar its clients load, client-only jars included).
+     */
+    static JavaModInfo parseMergedFor(Path commonDir, Path versionDir, boolean server) {
+        if (commonDir == null || !Files.isDirectory(commonDir) || versionDir == null || !Files.isDirectory(versionDir)) {
+            return null;
+        }
+        ParsedValues commonParsed = parseModInfoFile(commonDir.resolve("mod.info"));
+        if (commonParsed == null) {
+            ParsedValues verParsed = parseModInfoFile(versionDir.resolve("mod.info"));
+            return verParsed == null ? null : validateAndCreate(verParsed, versionDir.resolve("mod.info"), versionDir, commonDir, false, server);
+        }
+        return validateAndCreate(commonParsed, commonDir.resolve("mod.info"), commonDir, versionDir, false, server);
     }
 
     static JavaModInfo parseMerged(String commonDirStr, String versionDirStr) {
