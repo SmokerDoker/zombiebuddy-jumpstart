@@ -65,6 +65,35 @@ final class ModJarInjector {
         return parent;
     }
 
+    /**
+     * Jumpstart fork: a merged injection defines a mod's classes in the system class loader, but
+     * leaves the jar's other files behind, so {@code getResourceAsStream} found nothing (Viewpoint
+     * reads /viewpoint/build.properties that way and failed in the middle of a frame). The jar
+     * joins the system class loader's search path, so its files are found; its classes are all
+     * defined already and win over the copies in the jar.
+     */
+    static void serveResources(java.nio.file.Path jarPath, TransformedJar jar, ClassLoader loader) {
+        if (jarPath == null || loader != ClassLoader.getSystemClassLoader()) {
+            return;
+        }
+        boolean files = jar.resources().keySet().stream()
+                .anyMatch(name -> !name.startsWith("META-INF/") && !name.endsWith("/"));
+        if (!files) {
+            return;
+        }
+        java.lang.instrument.Instrumentation inst = Loader.g_instrumentation;
+        if (inst == null) {
+            Logger.warn("no instrumentation: the files in " + jarPath + " cannot be read through getResource");
+            return;
+        }
+        try {
+            inst.appendToSystemClassLoaderSearch(new JarFile(jarPath.toFile()));
+            Logger.info("files of " + jarPath.getFileName() + " readable through getResource");
+        } catch (java.io.IOException | RuntimeException e) {
+            Logger.error("cannot make the files of " + jarPath + " readable: " + e);
+        }
+    }
+
     private static ClassLoader parentLoader() {
         ClassLoader parent = ZombieBuddy.class.getClassLoader();
         if (parent == null) {

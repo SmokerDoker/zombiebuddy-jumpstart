@@ -577,6 +577,9 @@ public class Loader {
                 modLoader = shouldMergePatchJar(cacheKey, jarBytes)
                         ? ModJarInjector.injectMerged(transformed)
                         : ModJarInjector.inject(transformed);
+                if (jarBytes == null) {
+                    ModJarInjector.serveResources(cacheKey, transformed, modLoader); // Jumpstart fork
+                }
                 g_mod_loaders.put(cacheKey, modLoader);
                 g_transformed_jars.put(cacheKey, transformed);
                 Logger.info("loaded transformed mod jar", cacheKey);
