@@ -5,6 +5,25 @@ Goal: switch a Java mod's patch off and on in the running game, without a restar
 `MainScreenState.renderBackground` that draws "Hello World from ZBHelloWorld!" in the top-left
 corner of the main menu. It is verified in the BiteCheck registry.
 
+## Automated: `tools\gametest.ps1`
+
+```powershell
+.\tools\gametest.ps1
+```
+
+Runs the whole test without clicking and without touching your own setup: a separate data folder
+(`%USERPROFILE%\Zomboid-jumpstart-test`, passed as `-cachedir`), its own ZombieBuddy config, and
+the fork jar passed with `-javaagent` (the game folder stays as it is). Steam must be running.
+It drives the game through ZombieBuddy's experimental Lua server on `127.0.0.1:4444` and checks
+`ZombieBuddy.Hotswap.classHasString("zombie.gameStates.MainScreenState", "Hello World from ZBHelloWorld!")`
+after load, five off/on rounds, and a live update to `ZBHelloWorld-2x.jar`. The result is in
+`gametest-result.txt` in that folder; the exit code is the number of failed checks.
+
+Do not call anything that needs the OpenGL context from that Lua server (for example
+`getCore():TakeScreenshot()`): it runs on the game's main thread and crashes the game.
+
+The manual steps below are still useful to see the text appear and disappear on screen.
+
 ## 1. Build
 
 In `java/` with JDK 25:

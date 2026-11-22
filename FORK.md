@@ -15,6 +15,7 @@ ZombieBuddy works unchanged; mod_approvals.json, agent options and the mod API s
 | `Hotswap`: switch a mod's patches off and on at runtime, also from Lua as `ZombieBuddy.Hotswap` | `Hotswap.java` |
 | `Hotswap.load` (Lua: `loadJar`): load a mod jar at runtime, only if mod_approvals.json allows its SHA-256 | `Hotswap.java` |
 | `Hotswap.update` (Lua: `updateJar`): replace a loaded mod with a new version; the new classes are moved to package `jsv<n>.<package>` so they do not clash with the old ones | `Hotswap.java`, `JarRelocator.java` |
+| `Hotswap.classHasString` (Lua too): does the bytecode a loaded class runs right now contain a string; used to check that a patch is in or out | `Hotswap.java` |
 | No self-update from an upstream, Zed-signed ZombieBuddy.jar, so the fork is not silently replaced | `SelfUpdater.java`, `ForkInfo.java` |
 | Version string says "Jumpstart fork" (log, watermark) | `ZombieBuddy.java` |
 | Test `test_hotswap`: a patch on a class loaded after premain, switched off and on 50 times; a jar loaded at runtime only after approval; a mod updated v1 → v2 → v1 at runtime | `build.gradle`, `hotswappatches/`, `hotswaplive/`, `hotswapupdate/`, `test_hotswap/`, `testjar/src/testjar/Hotswap*Target.java` |
@@ -34,7 +35,7 @@ print(ZombieBuddy.Hotswap.loadJar("C:/path/to/MyMod.jar", "com.example.mymod", "
 print(ZombieBuddy.Hotswap.updateJar("C:/path/to/MyMod-1.1.jar", "com.example.mymod", "MyMod"))
 ```
 
-Step-by-step test: [TESTING.md](TESTING.md). CI proposal: [tools/ci](tools/ci/README.md).
+Step-by-step and automated in-game test: [TESTING.md](TESTING.md). CI proposal: [tools/ci](tools/ci/README.md).
 
 ## Limits
 
