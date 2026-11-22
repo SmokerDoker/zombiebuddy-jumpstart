@@ -98,6 +98,10 @@ public final class SelfUpdater {
     }
 
     public static boolean checkAndUpdateIfNewer(Path jarPath, Path currentJarPath, String currentVersion, int verbosity) {
+        if (!ForkInfo.UPSTREAM_SELF_UPDATE) {
+            // Jumpstart fork: an upstream ZombieBuddy.jar from the Workshop must not replace the fork.
+            return false;
+        }
         if (jarPath == null || !Files.isRegularFile(jarPath)) {
             return false;
         }

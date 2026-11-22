@@ -36,7 +36,7 @@ public class ZombieBuddy {
     }
     
     public static String getFullVersionString() {
-        return "ZombieBuddy v" + version;
+        return "ZombieBuddy v" + version + " (" + ForkInfo.NAME + ")";
     }
 
     public static void setAutoFixModOrder(boolean value) {
