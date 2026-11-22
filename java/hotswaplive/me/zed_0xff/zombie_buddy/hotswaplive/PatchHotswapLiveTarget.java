@@ -7,6 +7,6 @@ import me.zed_0xff.zombie_buddy.annotations.Patch;
 public class PatchHotswapLiveTarget {
     @Patch.OnExit
     public static void exit(@Patch.Return(readOnly = false) String returnValue) {
-        returnValue = returnValue + " +live";
+        returnValue = returnValue + new LiveSuffix().value();
     }
 }

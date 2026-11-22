@@ -1,16 +1,20 @@
 package me.zed_0xff.zombie_buddy;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.jar.JarFile;
 
 import me.zed_0xff.zombie_buddy.transformers.TransformedJar;
 import net.bytebuddy.dynamic.loading.ByteArrayClassLoader;
 import net.bytebuddy.dynamic.loading.ClassInjector;
+import net.bytebuddy.jar.asm.ClassReader;
 
 /** Defines transformed mod jar classes. */
 final class ModJarInjector {
@@ -54,7 +58,7 @@ final class ModJarInjector {
         }
 
         if (!toInject.isEmpty()) {
-            Map<String, Class<?>> injected = new ClassInjector.UsingUnsafe(parent).injectRaw(toInject);
+            Map<String, Class<?>> injected = injectInOrder(new ClassInjector.UsingUnsafe(parent), toInject);
             Logger.debug("Defined " + injected.size() + " transformed classes in " + parent);
         }
 
@@ -108,7 +112,7 @@ final class ModJarInjector {
             return;
         }
 
-        Map<String, Class<?>> injected = new ClassInjector.UsingUnsafe(targetLoader).injectRaw(toInject);
+        Map<String, Class<?>> injected = injectInOrder(new ClassInjector.UsingUnsafe(targetLoader), toInject);
         Logger.debug("Exposed " + injected.size() + " patch classes to " + targetLoader);
     }
 
@@ -123,6 +127,60 @@ final class ModJarInjector {
         } catch (ClassNotFoundException e) {
             Logger.error("Patch class " + patchClass.getName() + " not found in " + targetLoader + ": " + e.getMessage());
             return patchClass;
+        }
+    }
+
+    /**
+     * Jumpstart fork: defines classes one by one, supertypes first. Defining a class makes the JVM
+     * resolve its superclass and interfaces at once, and with Unsafe injection a supertype from the
+     * same jar that is not defined yet is not found: NoClassDefFoundError, and the mod fails to load
+     * depending on hash map order.
+     */
+    static Map<String, Class<?>> injectInOrder(ClassInjector injector, Map<String, byte[]> classes) {
+        Map<String, Class<?>> injected = new LinkedHashMap<>();
+        for (String name : definitionOrder(classes)) {
+            injected.putAll(injector.injectRaw(Map.of(name, classes.get(name))));
+        }
+        return injected;
+    }
+
+    /** Class names in an order where every superclass and interface in the map comes first. */
+    static List<String> definitionOrder(Map<String, byte[]> classes) {
+        List<String> order = new ArrayList<>(classes.size());
+        Set<String> done = new HashSet<>();
+        Set<String> visiting = new HashSet<>();
+        for (String name : new TreeSet<>(classes.keySet())) {
+            visit(name, classes, order, done, visiting);
+        }
+        return order;
+    }
+
+    private static void visit(String name, Map<String, byte[]> classes, List<String> order,
+                              Set<String> done, Set<String> visiting) {
+        if (done.contains(name) || !classes.containsKey(name) || !visiting.add(name)) {
+            return; // already placed, not in this jar, or a cycle (invalid bytecode; the JVM reports it)
+        }
+        for (String supertype : supertypes(classes.get(name))) {
+            visit(supertype, classes, order, done, visiting);
+        }
+        visiting.remove(name);
+        done.add(name);
+        order.add(name);
+    }
+
+    private static List<String> supertypes(byte[] bytes) {
+        try {
+            ClassReader reader = new ClassReader(bytes);
+            List<String> result = new ArrayList<>();
+            if (reader.getSuperName() != null) {
+                result.add(reader.getSuperName().replace('/', '.'));
+            }
+            for (String iface : reader.getInterfaces()) {
+                result.add(iface.replace('/', '.'));
+            }
+            return result;
+        } catch (RuntimeException e) {
+            return List.of(); // unreadable bytes: define it where it falls; the JVM will say what is wrong
         }
     }
 
