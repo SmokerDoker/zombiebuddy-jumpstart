@@ -135,6 +135,8 @@ public class Loader {
 
     static final Map<Path, ClassLoader> g_mod_loaders = new ConcurrentHashMap<>();
     static final Map<Path, TransformedJar> g_transformed_jars = new ConcurrentHashMap<>();
+    /** Jumpstart fork: patches installed per jar, so {@link Hotswap} can remove and re-apply them. */
+    static final Map<Path, PatchEngine.PatchHandle> g_patch_handles = new ConcurrentHashMap<>();
 
     static byte[] getTransformedClassBytes(String className) {
         for (TransformedJar jar : g_transformed_jars.values()) {
@@ -224,7 +226,7 @@ public class Loader {
     ) {}
 
     // key is jar pathname
-    private static final Map<Path, JavaModLoadState> g_jarLoadStatus = new ConcurrentHashMap<>();
+    static final Map<Path, JavaModLoadState> g_jarLoadStatus = new ConcurrentHashMap<>();
 
     // returns readonly snapshot
     static List<JavaModLoadState> getActiveJavaMods() {
@@ -1108,7 +1110,7 @@ public class Loader {
         // only apply patches on the first phase that loads this package
         if (phases.size() == 1) {
             Exposer.exposeClassesFromPackage(modLoader, transformed.classes().keySet(), packageName);
-            PatchEngine.applyPatches(transformed.patches(), modLoader, transformed);
+            g_patch_handles.put(jarPath, PatchEngine.applyPatches(transformed.patches(), modLoader, transformed));
         }
         return true;
     }

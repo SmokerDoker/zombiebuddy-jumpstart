@@ -8,10 +8,12 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import me.zed_0xff.zombie_buddy.annotations.Patch;
 import me.zed_0xff.zombie_buddy.transformers.TransformedJar;
 import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.dynamic.ClassFileLocator;
@@ -28,6 +30,46 @@ import net.bytebuddy.matcher.ElementMatchers;
 public final class PatchEngine {
 
     private PatchEngine() {}
+
+    /**
+     * What {@link #applyPatches} installed for one mod jar. {@link Hotswap} keeps it to remove the
+     * patches again. Only a switchable handle can be removed: all its transformers are
+     * retransformable and none of them changes the class format.
+     */
+    public static final class PatchHandle {
+        static final PatchHandle EMPTY = new PatchHandle(List.of(), Set.of(), true, new AtomicBoolean(true));
+
+        private final List<ResettableClassFileTransformer> transformers;
+        private final Set<String> targetClasses;
+        private final boolean switchable;
+        private final AtomicBoolean complete;
+
+        PatchHandle(List<ResettableClassFileTransformer> transformers, Set<String> targetClasses,
+                    boolean switchable, AtomicBoolean complete) {
+            this.transformers = List.copyOf(transformers);
+            this.targetClasses = Set.copyOf(targetClasses);
+            this.switchable = switchable;
+            this.complete = complete;
+        }
+
+        /** True if every transformer can be removed again at runtime. */
+        public boolean isSwitchable() {
+            return switchable;
+        }
+
+        /** False once a target class could not be patched (logged); the mod then works only partly. */
+        public boolean isComplete() {
+            return complete.get();
+        }
+
+        public Set<String> targetClasses() {
+            return targetClasses;
+        }
+
+        List<ResettableClassFileTransformer> transformers() {
+            return transformers;
+        }
+    }
 
     private static record PatchTarget(String className, String methodName) {}
 
@@ -140,7 +182,7 @@ public final class PatchEngine {
      * @param modLoader the class loader that defines the patch classes
      * @param transformedJar transformed mod jar contents (required for MethodDelegation into foreign class loaders)
      */
-    public static void applyPatches(List<String> patchClassNames, ClassLoader modLoader, TransformedJar transformedJar) {
+    public static PatchHandle applyPatches(List<String> patchClassNames, ClassLoader modLoader, TransformedJar transformedJar) {
         List<Class<?>> patches = new ArrayList<>();
         for (String patchClassName : patchClassNames) {
             try {
@@ -153,7 +195,7 @@ public final class PatchEngine {
         }
         if (patches.isEmpty()) {
             Logger.info("no patches to apply");
-            return;
+            return PatchHandle.EMPTY;
         }
 
         // Group patches by target class+method
@@ -258,6 +300,7 @@ public final class PatchEngine {
                 .disableClassFormatChanges();
         }
 
+        Map<String, AgentBuilder.Transformer> transforms = new HashMap<>();
         for (String className : targetClasses) {
             // Collect all method patches for this class
             Map<String, List<Class<?>>> methodAdvices = new HashMap<>();
@@ -388,6 +431,18 @@ public final class PatchEngine {
                 }
             };
 
+            transforms.put(className, patchTransform);
+        }
+
+        // Jumpstart fork: with hotswap on, an Advice-only jar gets one retransformable transformer
+        // that never changes the class format, so Hotswap can remove it again later.
+        if (Hotswap.isEnabled() && delegationPatches.isEmpty()) {
+            return installSwitchable(transforms, targetClasses, bbLogger);
+        }
+
+        for (var entry : transforms.entrySet()) {
+            String className = entry.getKey();
+            AgentBuilder.Transformer patchTransform = entry.getValue();
             if (firstLoadBuilder != null && patchOnFirstLoad.contains(className)) {
                 firstLoadBuilder = firstLoadBuilder.type(SyntaxSugar.typeMatcher(className)).transform(patchTransform);
             }
@@ -399,12 +454,14 @@ public final class PatchEngine {
             }
         }
 
+        List<ResettableClassFileTransformer> installed = new ArrayList<>();
+
         ClassLoader gameClassLoader = gameClassLoaderFrom(loadedClassByName);
         boolean mixedLoadedAndDeferred = !loadedClasses.isEmpty() && !patchOnFirstLoad.isEmpty();
 
         // Phase 1: not-yet-loaded targets — no disableClassFormatChanges (Advice may add helper methods on first define).
         if (firstLoadBuilder != null) {
-            firstLoadBuilder.installOn(Loader.g_instrumentation);
+            installed.add(firstLoadBuilder.installOn(Loader.g_instrumentation));
         }
 
         // Deferred targets that loaded between scan and phase-1 installOn need phase-2 retransform (with disable).
@@ -423,13 +480,44 @@ public final class PatchEngine {
         // Phase 2: already-loaded targets — disableClassFormatChanges restricts Advice to method-body changes only.
         if (needsRetransformPhase || !slipInLoaded.isEmpty()) {
             if (loadedBuilder != null) {
-                loadedBuilder.installOn(Loader.g_instrumentation);
+                installed.add(loadedBuilder.installOn(Loader.g_instrumentation));
             }
             if (deferredRetransformBuilder != null && !slipInLoaded.isEmpty()) {
-                deferredRetransformBuilder.installOn(Loader.g_instrumentation);
+                installed.add(deferredRetransformBuilder.installOn(Loader.g_instrumentation));
             }
             // installOn with RETRANSFORMATION already retransforms matching loaded types; explicit retransformClasses was redundant.
         }
+
+        // Phase-1 transformers are not retransformable and delegation changes the class format:
+        // either way the patches stay until the game restarts.
+        boolean switchable = firstLoadBuilder == null && delegationPatches.isEmpty();
+        return new PatchHandle(installed, targetClasses, switchable, new AtomicBoolean(true));
+    }
+
+    /** Jumpstart fork: one retransformable transformer for loaded and not-yet-loaded targets. */
+    private static PatchHandle installSwitchable(Map<String, AgentBuilder.Transformer> transforms,
+                                                 Set<String> targetClasses,
+                                                 AgentBuilder.Listener bbLogger) {
+        AtomicBoolean complete = new AtomicBoolean(true);
+        AgentBuilder builder = new AgentBuilder.Default()
+            .disableClassFormatChanges()
+            .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+            .with(bbLogger)
+            .with(zbListenerFor(targetClasses))
+            .with(new AgentBuilder.Listener.Adapter() {
+                @Override
+                public void onError(String typeName, ClassLoader cl, net.bytebuddy.utility.JavaModule jm,
+                                    boolean loaded, Throwable throwable) {
+                    complete.set(false);
+                    Logger.error("hotswap: " + typeName + " could not be patched without changing its class format;"
+                        + " this mod needs a game start without hotswap=true to work fully");
+                }
+            });
+        for (var entry : transforms.entrySet()) {
+            builder = builder.type(SyntaxSugar.typeMatcher(entry.getKey())).transform(entry.getValue());
+        }
+        ResettableClassFileTransformer transformer = builder.installOn(Loader.g_instrumentation);
+        return new PatchHandle(List.of(transformer), targetClasses, true, complete);
     }
 
     private static ClassFileLocator classFileLocator(TransformedJar transformedJar, ClassLoader modLoader) {

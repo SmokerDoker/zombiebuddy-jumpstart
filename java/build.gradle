@@ -242,6 +242,22 @@ sourceSets {
         // testpatches needs access to testjar classes for CustomObject
         compileClasspath += testjar.output
     }
+    // Jumpstart fork: Advice-only patches for test_hotswap
+    hotswappatches {
+        java {
+            srcDirs = ['hotswappatches']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
+    testHotswap {
+        java {
+            srcDirs = ['test_hotswap']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+        runtimeClasspath += main.output
+    }
 }
 
 // Copy native DLL to build/libs
@@ -426,6 +442,13 @@ task testpatchesJar(type: Jar) {
     dependsOn compileTestpatchesJava
 }
 
+// Jumpstart fork: JAR for the hotswappatches source set
+task hotswappatchesJar(type: Jar) {
+    archiveBaseName.set("hotswappatches")
+    from sourceSets.hotswappatches.output
+    dependsOn compileHotswappatchesJava
+}
+
 // Add testjar JAR as test dependency
 dependencies {
     testImplementation files(tasks.named('testJar'))
@@ -441,6 +464,12 @@ dependencies {
 
     // required for running tests because many ZB classes reference PZ classes, even if not directly tested, e.g. Exposer
     testPatchedRuntimeOnly files(GAME_CLASSPATH)
+
+    // Jumpstart fork: hotswap test
+    testHotswapImplementation files(tasks.named('testJar'))
+    testHotswapImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
+    testHotswapRuntimeOnly 'org.junit.platform:junit-platform-launcher:6.1.3'
+    testHotswapRuntimeOnly files(GAME_CLASSPATH)
 }
 
 // Configure all test tasks to always run and output test results
@@ -516,6 +545,34 @@ task test_patched(type: Test) {
     }
 }
 
+// Jumpstart fork: hotswap tests - run with javaagent, hotswap=true and an Advice-only patches jar
+// Run with: gradle test_hotswap
+task test_hotswap(type: Test) {
+    description = 'Runs the hotswap tests (with javaagent and hotswap=true) from test_hotswap directory'
+    group = 'verification'
+
+    useJUnitPlatform()
+    dependsOn testJar
+    dependsOn hotswappatchesJar
+    dependsOn shadowJar
+
+    testClassesDirs = sourceSets.testHotswap.output.classesDirs
+    classpath = sourceSets.testHotswap.runtimeClasspath
+
+    def patchesJarPath = hotswappatchesJar.archiveFile.get().asFile.absolutePath
+    def patchesPackageName = "me.zed_0xff.zombie_buddy.hotswappatches"
+    systemProperty 'zb.test.hotswapJar', patchesJarPath
+
+    doFirst {
+        def gsonJar = configurations.runtimeClasspath.find { it.name.contains("gson") }
+        if (!gsonJar) throw new GradleException("gson jar not found in runtimeClasspath")
+        def bcJar = configurations.runtimeClasspath.find { it.name.contains("bcprov") }
+        if (!bcJar) throw new GradleException("bouncycastle jar not found in runtimeClasspath")
+        jvmArgs "-Xbootclasspath/a:${gsonJar}${File.pathSeparator}${bcJar}"
+        jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${patchesJarPath}:${patchesPackageName},config_dir=.config,prop_prefix=zb,hotswap=true"
+    }
+}
+
 // Unit tests (test/ source set) - e.g. AccessorTest, VersionCheckTest, PatchTest
 task unitTest(type: Test) {
     description = 'Runs unit tests from test/ directory'
@@ -540,6 +597,7 @@ tasks.named('test', Test) {
     dependsOn unitTest
     dependsOn test_vanilla
     dependsOn test_patched
+    dependsOn test_hotswap
     
     // Don't fail if no tests are discovered (since we're not running any here)
     failOnNoDiscoveredTests = false
