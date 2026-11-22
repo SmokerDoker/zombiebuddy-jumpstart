@@ -1,6 +1,7 @@
 package me.zed_0xff.zombie_buddy.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -35,6 +36,12 @@ public class HotswapTest {
             assertNull(Hotswap.switchOn(jar), "on, round " + round);
             assertEquals("vanilla +patched", target.greet(), "on, round " + round);
         }
+
+        assertTrue(Hotswap.classHasString("testjar.HotswapTarget", " +patched"));
+        assertNull(Hotswap.switchOff(jar));
+        assertFalse(Hotswap.classHasString("testjar.HotswapTarget", " +patched"));
+        assertNull(Hotswap.switchOn(jar));
+        assertTrue(Hotswap.classHasString("testjar.HotswapTarget", " +patched"));
     }
 
     @Test

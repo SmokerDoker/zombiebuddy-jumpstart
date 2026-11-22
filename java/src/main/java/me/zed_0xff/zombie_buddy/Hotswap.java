@@ -1,6 +1,10 @@
 package me.zed_0xff.zombie_buddy;
 
 import java.io.IOException;
+import java.lang.instrument.ClassFileTransformer;
+import java.lang.instrument.UnmodifiableClassException;
+import java.nio.charset.StandardCharsets;
+import java.security.ProtectionDomain;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -9,6 +13,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
@@ -89,6 +94,64 @@ public final class Hotswap {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Diagnostics (Lua too): whether the bytecode a loaded class runs right now contains a string
+     * constant, for example a text only a patch adds. Retransforms the class once to read its
+     * current bytes; all registered transformers run again, so nothing changes.
+     */
+    public static synchronized boolean classHasString(String className, String text) {
+        if (Utils.isBlank(className) || text == null || text.isEmpty()) {
+            return false;
+        }
+        Class<?> target = null;
+        for (Class<?> loaded : Loader.g_instrumentation.getAllLoadedClasses()) {
+            if (loaded.getName().equals(className)) {
+                target = loaded;
+                break;
+            }
+        }
+        if (target == null || !Loader.g_instrumentation.isModifiableClass(target)) {
+            return false;
+        }
+        final Class<?> wanted = target;
+        AtomicReference<byte[]> current = new AtomicReference<>();
+        // Added last, so it sees the bytes after every other retransformable transformer.
+        ClassFileTransformer capture = new ClassFileTransformer() {
+            @Override
+            public byte[] transform(Module module, ClassLoader loader, String name, Class<?> redefined,
+                                    ProtectionDomain domain, byte[] bytes) {
+                if (redefined == wanted) {
+                    current.set(bytes.clone());
+                }
+                return null;
+            }
+        };
+        Loader.g_instrumentation.addTransformer(capture, true);
+        try {
+            Loader.g_instrumentation.retransformClasses(target);
+        } catch (UnmodifiableClassException | RuntimeException e) {
+            Logger.error("hotswap: cannot read " + className + ": " + e);
+            return false;
+        } finally {
+            Loader.g_instrumentation.removeTransformer(capture);
+        }
+        byte[] bytes = current.get();
+        return bytes != null && indexOf(bytes, text.getBytes(StandardCharsets.UTF_8)) >= 0;
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle) {
+        outer:
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
     }
 
     /** Removes the jar's patches. Returns null on success, otherwise why nothing was changed. */
