@@ -73,5 +73,5 @@ fails on Windows.
 ## Staying close to upstream
 
 Fork commits live on top of upstream's `main`. To take a new upstream release:
-`git fetch upstream && git rebase upstream/main`. The changes are kept small and in separate
+`git fetch upstream && git rebase upstream/master`. The changes are kept small and in separate
 commits so they can be offered upstream as a pull request at any time.
