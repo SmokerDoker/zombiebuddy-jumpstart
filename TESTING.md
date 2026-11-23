@@ -39,8 +39,7 @@ In `java/` with JDK 25:
 gradle -PgameClasspath="C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid\projectzomboid.jar" shadowJar
 ```
 
-The jar is `java\build\jdk25\libs\zombiebuddy-jumpstart.jar`. `shadowJar` takes several minutes
-(Bouncy Castle relocation).
+The jar is `java\build\jdk25\libs\zombiebuddy-jumpstart.jar`.
 
 ## 2. Install
 

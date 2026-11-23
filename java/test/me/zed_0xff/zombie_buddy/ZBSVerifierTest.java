@@ -14,7 +14,12 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
+import java.security.Signature;
+import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -174,6 +179,64 @@ class ZBSVerifierTest {
         ZBSVerifier.Verification result = new ZBSVerifier.InvalidSignature(AUTHOR_ID, "Long explanation.");
 
         assertEquals("Invalid signature.\nLong explanation.", ZBSVerifier.noticeForUi(result));
+    }
+
+    // RFC 8032, section 7.1, TEST 2 (one-byte message 0x72)
+    private static final String RFC8032_PUBLIC_KEY = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c";
+    private static final String RFC8032_SIGNATURE =
+        "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da" +
+        "085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00";
+
+    @Test
+    void verifyEd25519_acceptsRfc8032TestVector() throws Exception {
+        HexFormat hex = HexFormat.of();
+        assertTrue(ZBSVerifier.verifyEd25519(hex.parseHex(RFC8032_PUBLIC_KEY), new byte[] { 0x72 }, hex.parseHex(RFC8032_SIGNATURE)));
+    }
+
+    @Test
+    void verifyEd25519_rejectsChangedMessageOrSignature() throws Exception {
+        HexFormat hex = HexFormat.of();
+        byte[] pub = hex.parseHex(RFC8032_PUBLIC_KEY);
+        byte[] sig = hex.parseHex(RFC8032_SIGNATURE);
+        assertFalse(ZBSVerifier.verifyEd25519(pub, new byte[] { 0x73 }, sig));
+        sig[0] ^= 1;
+        assertFalse(ZBSVerifier.verifyEd25519(pub, new byte[] { 0x72 }, sig));
+    }
+
+    @Test
+    void verifyEd25519_undecodableKeyOrSignatureDoesNotMatch() throws Exception {
+        HexFormat hex = HexFormat.of();
+        byte[] pub = hex.parseHex(RFC8032_PUBLIC_KEY);
+        byte[] sig = hex.parseHex(RFC8032_SIGNATURE);
+        byte[] msg = { 0x72 };
+        assertFalse(ZBSVerifier.verifyEd25519(pub, msg, new byte[63]));
+        assertFalse(ZBSVerifier.verifyEd25519(new byte[31], msg, sig));
+        byte[] notOnCurve = new byte[32];
+        notOnCurve[0] = 2; // y = 2 has no x on the curve
+        assertFalse(ZBSVerifier.verifyEd25519(notOnCurve, msg, sig));
+        byte[] sNotReduced = sig.clone();
+        Arrays.fill(sNotReduced, 32, 64, (byte) 0xff); // S >= group order
+        assertFalse(ZBSVerifier.verifyEd25519(pub, msg, sNotReduced));
+    }
+
+    @Test
+    void verify_acceptsSignatureFromJdkSigner() throws Exception {
+        // the other direction from signedFixture (Bouncy Castle signs, the JDK verifies)
+        KeyPair keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        byte[] spki = keys.getPublic().getEncoded();
+        String publicKeyHex = hex(Arrays.copyOfRange(spki, spki.length - 32, spki.length));
+        Path jarPath = writeJar("jdk signed");
+        String jarHash = sha256Hex(jarPath);
+        Signature signer = Signature.getInstance("Ed25519");
+        signer.initSign(keys.getPrivate());
+        signer.update(("ZBS:" + AUTHOR_ID.value() + ":" + jarHash).getBytes(StandardCharsets.UTF_8));
+        Path zbsPath = jarPath.resolveSibling(jarPath.getFileName() + ".zbs");
+        Files.writeString(zbsPath, "ZBS\nSteamID64:" + AUTHOR_ID.value() + "\nSignature:" + hex(signer.sign()) + "\n");
+
+        ZBSVerifier.Verification result = ZBSVerifier.verify(
+            jarPath, zbsPath, jarHash, AUTHOR_ID, knownAuthors(AUTHOR_ID, publicKeyHex));
+
+        assertInstanceOf(ZBSVerifier.ValidSignature.class, result);
     }
 
     private SignedFixture signedFixture(SteamID64 sid) throws Exception {

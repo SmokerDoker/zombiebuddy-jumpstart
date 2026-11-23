@@ -4,8 +4,6 @@ import static me.zed_0xff.zombie_buddy.SteamWorkshop.SteamID64;
 
 import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
-import org.bouncycastle.crypto.signers.Ed25519Signer;
 
 import java.io.IOException;
 import java.lang.reflect.Type;
@@ -132,11 +130,7 @@ public final class KnownAuthors {
         try {
             HexFormat hex = HexFormat.of();
             byte[] pubRaw = hex.parseHex(AUTHORS_PUBKEY_HEX);
-            Ed25519PublicKeyParameters pub = new Ed25519PublicKeyParameters(pubRaw, 0);
-            Ed25519Signer signer = new Ed25519Signer();
-            signer.init(false, pub);
-            signer.update(msg, 0, msg.length);
-            boolean ok = signer.verifySignature(hex.parseHex(sigHex));
+            boolean ok = ZBSVerifier.verifyEd25519(pubRaw, msg, hex.parseHex(sigHex));
             if (!ok) Logger.warn("authors.json: signature verification failed");
             return ok;
         } catch (Exception e) {

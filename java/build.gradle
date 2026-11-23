@@ -34,7 +34,6 @@ dependencies {
     implementation 'net.bytebuddy:byte-buddy:1.18.14'
 //    implementation 'org.ow2.asm:asm:9.10.1'
     implementation 'org.ow2.asm:asm-tree:9.10.1'                   // XXX should match version.asm in byte-buddy's pom.xml
-    implementation 'org.bouncycastle:bcprov-jdk18on:1.86'
     implementation 'com.google.code.gson:gson:2.14.0'
 
     compileOnly files(GAME_CLASSPATH)
@@ -45,6 +44,8 @@ dependencies {
     testImplementation 'org.mockito:mockito-core:5.24.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.24.0'
     testImplementation 'org.assertj:assertj-core:3.27.7'
+    // Jumpstart fork: ZombieBuddy verifies Ed25519 with the JDK; the tests sign with Bouncy Castle
+    testImplementation 'org.bouncycastle:bcprov-jdk18on:1.86'
 }
 
 def MOD_ID = project.projectDir.parentFile.name
@@ -82,7 +83,6 @@ shadowJar {
     }
 
     relocate 'com.google.gson', 'zb.com.google.gson'
-    relocate 'org.bouncycastle', 'zb.org.bouncycastle'
 
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
@@ -596,9 +596,7 @@ task test_patched(type: Test) {
     doFirst {
         def gsonJar = configurations.runtimeClasspath.find { it.name.contains("gson") }
         if (!gsonJar) throw new GradleException("gson jar not found in runtimeClasspath")
-        def bcJar = configurations.runtimeClasspath.find { it.name.contains("bcprov") }
-        if (!bcJar) throw new GradleException("bouncycastle jar not found in runtimeClasspath")
-        jvmArgs "-Xbootclasspath/a:${gsonJar}${File.pathSeparator}${bcJar}"
+        jvmArgs "-Xbootclasspath/a:${gsonJar}"
         jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${patchesJarPath}:${patchesPackageName},config_dir=.config,prop_prefix=zb"
     }
 }
@@ -632,9 +630,7 @@ task test_hotswap(type: Test) {
     doFirst {
         def gsonJar = configurations.runtimeClasspath.find { it.name.contains("gson") }
         if (!gsonJar) throw new GradleException("gson jar not found in runtimeClasspath")
-        def bcJar = configurations.runtimeClasspath.find { it.name.contains("bcprov") }
-        if (!bcJar) throw new GradleException("bouncycastle jar not found in runtimeClasspath")
-        jvmArgs "-Xbootclasspath/a:${gsonJar}${File.pathSeparator}${bcJar}"
+        jvmArgs "-Xbootclasspath/a:${gsonJar}"
         jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${patchesJarPath}:${patchesPackageName},config_dir=${hotswapConfigDir},prop_prefix=zb,hotswap=true"
     }
 }

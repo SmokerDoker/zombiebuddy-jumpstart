@@ -4,9 +4,6 @@ import static me.zed_0xff.zombie_buddy.SteamWorkshop.SteamID64;
 import static me.zed_0xff.zombie_buddy.SteamWorkshop.WorkshopItemID;
 import static me.zed_0xff.zombie_buddy.ModFlags.*;
 
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
-import org.bouncycastle.crypto.signers.Ed25519Signer;
-
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.net.URI;
@@ -15,7 +12,15 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.InvalidKeyException;
+import java.security.KeyFactory;
+import java.security.Signature;
+import java.security.SignatureException;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
@@ -39,7 +44,27 @@ public final class ZBSVerifier {
     /** Pubkey may appear anywhere in the profile HTML (summary, etc.). */
     private static final Pattern JAVA_MOD_ZBS_IN_HTML = Pattern.compile("JavaModZBS:([0-9a-fA-F]{64})");
 
+    /** X.509 SubjectPublicKeyInfo header for a raw 32-byte Ed25519 public key (RFC 8410). */
+    private static final byte[] ED25519_SPKI_PREFIX = HexFormat.of().parseHex("302a300506032b6570032100");
+
     private ZBSVerifier() {}
+
+    /**
+     * Ed25519 check with the JDK's own implementation. A key or signature that cannot be decoded
+     * does not match, as with Bouncy Castle's {@code Ed25519Signer}, which was used before.
+     */
+    static boolean verifyEd25519(byte[] publicKey, byte[] message, byte[] signature) throws GeneralSecurityException {
+        byte[] spki = Arrays.copyOf(ED25519_SPKI_PREFIX, ED25519_SPKI_PREFIX.length + publicKey.length);
+        System.arraycopy(publicKey, 0, spki, ED25519_SPKI_PREFIX.length, publicKey.length);
+        try {
+            Signature verifier = Signature.getInstance("Ed25519");
+            verifier.initVerify(KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(spki)));
+            verifier.update(message);
+            return verifier.verify(signature);
+        } catch (InvalidKeySpecException | InvalidKeyException | SignatureException e) {
+            return false;
+        }
+    }
 
     /** Loader-facing ZBS check result, including policy/UI information. */
     record CheckResult(
@@ -201,12 +226,7 @@ public final class ZBSVerifier {
                 if (pubRaw.length != 32) {
                     return new VerificationError(sid, "JavaModZBS in " + keySource + " must be 64 hex chars (32-byte Ed25519 public key).", pubHexes);
                 }
-                Ed25519PublicKeyParameters pub = new Ed25519PublicKeyParameters(pubRaw, 0);
-                Ed25519Signer signer = new Ed25519Signer();
-                signer.init(false, pub);
-                signer.update(msg, 0, msg.length);
-                boolean ok = signer.verifySignature(sig);
-                if (ok) {
+                if (verifyEd25519(pubRaw, msg, sig)) {
                     return new ValidSignature(sid, pubHexes);
                 }
             }
