@@ -91,6 +91,11 @@ shadowJar {
     exclude 'META-INF/versions/**'
     exclude '*.dll'
 
+    // Jumpstart fork: the annotation processor checks patches at compile time (javac), never in the
+    // game; compile*Java below gets it from sourceSets.main.output, not from this jar.
+    exclude 'me/zed_0xff/zombie_buddy/PatchAnnotationProcessor*.class'
+    exclude 'META-INF/services/javax.annotation.processing.Processor'
+
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
