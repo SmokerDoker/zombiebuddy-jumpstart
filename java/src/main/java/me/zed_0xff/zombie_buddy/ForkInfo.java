@@ -18,7 +18,4 @@ public final class ForkInfo {
 
     public static final String NAME = "Jumpstart fork";
     public static final String UPSTREAM = "https://github.com/zed-0xff/ZombieBuddy";
-
-    /** Upstream replaces the running jar with a newer Zed-signed one; the fork must not allow that. */
-    static final boolean UPSTREAM_SELF_UPDATE = false;
 }
