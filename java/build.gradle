@@ -441,10 +441,24 @@ task experimentalJar(type: com.github.jengelman.gradle.plugins.shadow.tasks.Shad
 }
 
 shadowJar {
-    dependsOn patchesJar, experimentalJar
+    dependsOn patchesJar
     from(patchesJar.archiveFile) {
         rename { 'patches.jar' }
     }
+}
+
+// Jumpstart fork: experimental.jar (agent option `experimental`: Lua server, debug patches) is not
+// in the player jar. The automated in-game tests need its Lua server; they use this jar instead:
+// build/jdk25/libs/zombiebuddy-jumpstart-experimental.jar = the player jar + experimental.jar.
+task shadowJarExperimental(type: Zip) {
+    description = 'Builds the agent jar with experimental.jar, for the automated in-game tests'
+    group = 'build'
+    dependsOn shadowJar, experimentalJar
+    archiveBaseName.set(MOD_ID)
+    archiveClassifier.set('experimental')
+    archiveExtension.set('jar')
+    destinationDirectory.set(shadowJar.destinationDirectory)
+    from(zipTree(shadowJar.archiveFile))
     from(experimentalJar.archiveFile) {
         rename { 'experimental.jar' }
     }

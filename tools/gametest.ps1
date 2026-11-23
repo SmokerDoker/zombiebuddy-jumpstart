@@ -13,11 +13,14 @@
   live update to ZBHelloWorld-2x.jar. Results go to <TestDir>\gametest-result.txt; the game is
   closed at the end unless -KeepRunning.
 
+  The Lua server is in experimental.jar, which only the test jar contains: build it in java\ with
+  gradle shadowJarExperimental (the player jar from shadowJar has no Lua server).
+
   Both ZBHelloWorld jars are approved only in the test config; they are verified in BiteCheck.
 #>
 param(
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid",
-    [string]$Jar = (Join-Path $PSScriptRoot "..\java\build\jdk25\libs\zombiebuddy-jumpstart.jar"),
+    [string]$Jar = (Join-Path $PSScriptRoot "..\java\build\jdk25\libs\zombiebuddy-jumpstart-experimental.jar"),
     [string]$TestDir = "$env:USERPROFILE\Zomboid-jumpstart-test",
     [switch]$KeepRunning
 )

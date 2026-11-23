@@ -8,8 +8,15 @@ corner of the main menu. It is verified in the BiteCheck registry.
 ## Automated: `tools\gametest.ps1`
 
 ```powershell
+cd java
+gradle -PgameClasspath="C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid\projectzomboid.jar" shadowJarExperimental
+cd ..
 .\tools\gametest.ps1
 ```
+
+The test needs `java\build\jdk25\libs\zombiebuddy-jumpstart-experimental.jar`: the player jar plus
+`experimental.jar`, which has the Lua server the test talks to. The player jar from `shadowJar`
+leaves `experimental.jar` out; with it, the agent option `experimental` only logs that it is ignored.
 
 Runs the whole test without clicking and without touching your own setup: a separate data folder
 (`%USERPROFILE%\Zomboid-jumpstart-test`, passed as `-cachedir`), its own ZombieBuddy config, and

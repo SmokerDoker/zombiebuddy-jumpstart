@@ -94,7 +94,10 @@ public class Agent {
 
         String basePkg = ZombieBuddy.class.getPackage().getName();
         Loader.loadResourceJar(Loader.BUNDLED_PATCHES_JAR, basePkg + ".patches", Loader.Phase.PREMAIN);
-        if (isExperimental()) {
+        if (isExperimental() && Loader.class.getClassLoader().getResource(Loader.BUNDLED_EXPERIMENTAL_JAR) == null) {
+            // Jumpstart fork: the player jar has no experimental.jar, only the test jar (gradle shadowJarExperimental)
+            Logger.warn("option 'experimental' ignored: this ZombieBuddy jar was built without experimental.jar (gradle shadowJarExperimental)");
+        } else if (isExperimental()) {
             Loader.loadResourceJar(Loader.BUNDLED_EXPERIMENTAL_JAR, basePkg + ".patches.experimental", Loader.Phase.PREMAIN);
         }
 

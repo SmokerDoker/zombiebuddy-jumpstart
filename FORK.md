@@ -21,6 +21,7 @@ ZombieBuddy works unchanged; mod_approvals.json, agent options and the mod API s
 | Version string says "Jumpstart fork" (log, watermark) | `ZombieBuddy.java` |
 | Test `test_hotswap`: a patch on a class loaded after premain, switched off and on 50 times; a jar loaded at runtime only after approval; a mod updated v1 → v2 → v1 at runtime | `build.gradle`, `hotswappatches/`, `hotswaplive/`, `hotswapupdate/`, `test_hotswap/`, `testjar/src/testjar/Hotswap*Target.java` |
 | No `byte-buddy-agent` in the jar: ZombieBuddy is always started with `-javaagent` and never attaches itself, so the attach code and its `attach_hotspot_windows.dll` files are left out | `build.gradle` |
+| No `experimental.jar` in the player jar (`shadowJar`); the automated in-game tests, which need its Lua server, use `zombiebuddy-jumpstart-experimental.jar` from `shadowJarExperimental`. The agent option `experimental` with the player jar logs one line and is ignored | `build.gradle`, `Agent.java`, `tools/gametest.ps1`, `TESTING.md` |
 
 Without `hotswap=true` the fork patches exactly like upstream.
 
