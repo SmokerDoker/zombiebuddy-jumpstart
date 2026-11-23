@@ -25,6 +25,7 @@ ZombieBuddy works unchanged; mod_approvals.json, agent options and the mod API s
 | No `PatchAnnotationProcessor` in the player jar: it checks `@Patch` classes at compile time and never runs in the game; the build still uses it from the compiled classes | `build.gradle` |
 | Self-update code removed (jar signature check, replacing the running jar): with self-update off it never ran; the log line and watermark stay as before | `SelfUpdater.java`, `ForkInfo.java` |
 | Ed25519 signatures (`.jar.zbs`, authors.json) are checked with the JDK (`java.security`, Java 15+) instead of Bouncy Castle, which is now only a test dependency; same keys, same results | `ZBSVerifier.java`, `KnownAuthors.java`, `build.gradle`, `ZBSVerifierTest.java`, `KnownAuthorsTest.java` |
+| A mod loaded or updated live gets its Lua classes and global functions (`@LuaClass`, `@LuaMethod(global = true)`) right away, not only at the next Lua start; before, a mod whose Lua checks for its Java part at once (Knox Inventory) said its Java part was missing. In-game test: `tools\lualivetest.ps1` in jumpstart-pz | `Exposer.java`, `Hotswap.java` |
 
 Without `hotswap=true` the fork patches exactly like upstream.
 

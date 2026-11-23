@@ -211,19 +211,7 @@ public class Exposer {
 
         // Expose global functions
         for (Class<?> cls : g_classesWithGlobalLuaMethod) {
-            Object instance;
-            try {
-                instance = newInstanceForGlobalLuaMethods(cls);
-            } catch (ReflectiveOperationException e) {
-                Logger.error("Cannot expose global Lua functions from " + cls.getName() + ": " + e.getMessage());
-                continue;
-            }
-            try {
-                Logger.info("Exposing global functions from class: " + cls.getName());
-                exposer.exposeGlobalFunctions(instance);
-            } catch (Throwable t) {
-                Logger.error("exposeGlobalFunctions(" + cls.getName() + "): " + t.getMessage());
-            }
+            exposeGlobalsNow(cls);
         }
 
         // Expose individual methods (for @HiddenFromLua overrides)
@@ -233,6 +221,62 @@ public class Exposer {
                 exposeMethodNow(cls, methodName);
             }
         }
+    }
+
+    private static void exposeGlobalsNow(Class<?> cls) {
+        Object instance;
+        try {
+            instance = newInstanceForGlobalLuaMethods(cls);
+        } catch (ReflectiveOperationException e) {
+            Logger.error("Cannot expose global Lua functions from " + cls.getName() + ": " + e.getMessage());
+            return;
+        }
+        try {
+            Logger.info("Exposing global functions from class: " + cls.getName());
+            LuaManager.exposer.exposeGlobalFunctions(instance);
+        } catch (Throwable t) {
+            Logger.error("exposeGlobalFunctions(" + cls.getName() + "): " + t.getMessage());
+        }
+    }
+
+    /** What is registered for Lua now; see {@link #exposeAddedSince}. */
+    public record Registered(java.util.Set<Class<?>> classes, java.util.Set<Class<?>> globals) {
+    }
+
+    public static Registered registered() {
+        return new Registered(new HashSet<>(g_exposed_classes.keySet()), new HashSet<>(g_classesWithGlobalLuaMethod));
+    }
+
+    /**
+     * Jumpstart fork: a mod loaded while the game runs ({@link Hotswap}) registers its Lua classes and
+     * global functions, but they reach Lua only at the next Lua start (exposeAll). A mod whose Lua
+     * checks for its Java part at once then believes it is missing. This exposes what was registered
+     * since {@code before} right away, if Lua is up; a later Lua start exposes it again as usual.
+     * Call on the game's main thread. Returns how many classes it exposed.
+     */
+    public static int exposeAddedSince(Registered before) {
+        if (LuaManager.exposer == null || LuaManager.env == null) {
+            return 0; // Lua is not up yet: exposeAll will do it
+        }
+        List<Class<?>> added = new ArrayList<>();
+        for (Class<?> cls : g_exposed_classes.keySet()) {
+            if (!before.classes().contains(cls)) {
+                added.add(cls);
+            }
+        }
+        // as in afterExposeAll: classes under their own name first, renamed ones second
+        added.sort((a, b) -> Boolean.compare(!Utils.isBlank(g_exposed_classes.get(a)), !Utils.isBlank(g_exposed_classes.get(b))));
+        for (Class<?> cls : added) {
+            exposeClassNow(cls);
+        }
+        int n = added.size();
+        for (Class<?> cls : getClassesWithGlobalLuaMethod()) {
+            if (!before.globals().contains(cls)) {
+                exposeGlobalsNow(cls);
+                n++;
+            }
+        }
+        return n;
     }
 
     private static void exposeMethodNow(Class<?> cls, String methodName) {

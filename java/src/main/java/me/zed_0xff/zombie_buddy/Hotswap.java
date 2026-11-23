@@ -235,6 +235,21 @@ public final class Hotswap {
     }
 
     /**
+     * Gives Lua what a live load registered (its @LuaClass classes, global functions) right away,
+     * not only at the next Lua start, so the mod's Lua finds its Java part at once.
+     */
+    private static void exposeNow(String modId, Exposer.Registered before) {
+        try {
+            int n = Exposer.exposeAddedSince(before);
+            if (n > 0) {
+                Logger.info("hotswap: " + modId + ": " + n + " Lua exposure(s) available right away");
+            }
+        } catch (Throwable t) {
+            Logger.error("hotswap: " + modId + ": exposing to Lua failed, available after the next load: " + t);
+        }
+    }
+
+    /**
      * Loads a mod jar that was not loaded at start and applies its patches (switchable, like every
      * jar with hotswap on). Runs the mod's Main class like a normal load. Returns null on success,
      * otherwise why nothing was loaded.
@@ -277,6 +292,7 @@ public final class Hotswap {
         }
 
         // loadJar re-checks the hash right before it reads the jar, so a swapped file is refused.
+        Exposer.Registered before = Exposer.registered();
         if (!Loader.loadJar(jar, packageName, hash, Loader.Phase.MAIN)) {
             return "ZombieBuddy could not load it (see log)";
         }
@@ -284,6 +300,7 @@ public final class Hotswap {
         Loader.g_jarLoadStatus.put(jar, new Loader.JavaModLoadState(
             id, jar, new ModFlags(ModFlags.MF_ACTIVE), "loaded live", hash, Boolean.TRUE));
         Logger.info("hotswap: loaded " + id + " from " + jar);
+        exposeNow(id, before);
 
         PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(jar);
         return handle == null || handle.isComplete() ? null : "loaded, but some classes could not be patched (see log)";
@@ -359,6 +376,7 @@ public final class Hotswap {
         }
 
         Path key = Path.of(jar + "#" + newPackage);
+        Exposer.Registered before = Exposer.registered();
         boolean loaded;
         try {
             loaded = Loader.transformAndLoadJar(key, newPackage, Loader.Phase.MAIN, relocated);
@@ -377,6 +395,7 @@ public final class Hotswap {
         Loader.g_jarLoadStatus.put(key, new Loader.JavaModLoadState(
             modId, key, new ModFlags(ModFlags.MF_ACTIVE), "updated live", hash, Boolean.TRUE));
         Logger.info("hotswap: updated " + modId + " to " + jar + " as package " + newPackage);
+        exposeNow(modId, before);
 
         PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(key);
         return handle == null || handle.isComplete() ? null : "updated, but some classes could not be patched (see log)";
