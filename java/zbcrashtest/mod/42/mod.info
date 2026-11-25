@@ -1,0 +1,9 @@
+name=ZBCrashTest (Jumpstart fork test)
+id=ZBCrashTest
+description=Test mod for the crash protection of the ZombieBuddy Jumpstart fork: throws in the main menu while armed from Lua. Not for playing.
+author=SmokerDoker
+require=\ZombieBuddy
+
+javaPkgName=me.zed_0xff.zb_crash_test
+javaJarFile=media/java/client/ZBCrashTest.jar
+ZBVersionMin=3.0.0
