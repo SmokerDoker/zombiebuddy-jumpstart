@@ -25,7 +25,9 @@ import me.zed_0xff.zombie_buddy.Utils;
 import me.zed_0xff.zombie_buddy.annotations.Patch;
 import me.zed_0xff.zombie_buddy.jardump.AsmDump;
 import me.zed_0xff.zombie_buddy.transformers.bytebuddy.Unshadow;
+import me.zed_0xff.zombie_buddy.transformers.asmtree.AdviceGuard;
 import me.zed_0xff.zombie_buddy.transformers.asmtree.Converter;
+import me.zed_0xff.zombie_buddy.transformers.asmtree.JavaWrites;
 import me.zed_0xff.zombie_buddy.transformers.asmtree.Publicizer;
 import me.zed_0xff.zombie_buddy.transformers.asmtree.Resolver;
 import me.zed_0xff.zombie_buddy.transformers.asmtree.ShadowRewrite;
@@ -62,8 +64,18 @@ public final class Pipeline {
         new TransSpec("shadow",   ShadowRewrite.class,   "Rewrite shadow target access via VarHandle/MethodHandle", TransOpt.DEFAULT),
         new TransSpec("pub-all",  Publicizer.class,      "Publicize all members unconditionally"),
         new TransSpec("pub-cond", Publicizer.class,      "Publicize if any annotations were converted by the previous steps", TransOpt.CONDITIONAL, TransOpt.DEFAULT),
+        // Jumpstart fork: crash protection and clean removal (see ModGuard, ModWrites, ModIO)
+        new TransSpec("guard",    AdviceGuard.class,     "Advice catches its own exceptions (suppress = Throwable) and has a trip wire", TransOpt.DEFAULT),
+        new TransSpec("writes",   JavaWrites.class,      "Report static writes into game classes and file writes of a mod", TransOpt.DEFAULT),
         new TransSpec("none",     NoopTransformer.class, "Do nothing (for testing/debugging purposes)"),
     };
+
+    /** Jumpstart fork: the mod package of the jar being transformed (null outside a jar transform). */
+    private static final ThreadLocal<String> g_package = new ThreadLocal<>();
+
+    public static String currentPackage() {
+        return g_package.get();
+    }
 
     private static Supplier<Transformer> conditional(Supplier<? extends Transformer> factory) {
         return () -> new ConditionalTransformer(factory);
@@ -214,7 +226,13 @@ public final class Pipeline {
         Pipeline pipeline = patchLoad();
 
         try (JarContext jctx = JarContext.forClasses(classes)) {
-            pipeline.transformJarClasses(jctx, classNames);
+            String prevPackage = g_package.get();
+            g_package.set(Utils.isBlank(packageName) ? null : packageName);
+            try {
+                pipeline.transformJarClasses(jctx, classNames);
+            } finally {
+                if (prevPackage == null) g_package.remove(); else g_package.set(prevPackage);
+            }
 
             HashMap<String, byte[]> transformedClasses = new HashMap<>(classes.size());
             for (String className : classNames) {

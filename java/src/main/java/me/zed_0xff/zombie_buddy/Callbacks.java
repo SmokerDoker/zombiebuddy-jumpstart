@@ -36,7 +36,17 @@ public final class Callbacks {
         public void register(Runnable callback) {
             if (callback != null) {
                 callbacks.add(callback);
+                // Jumpstart fork: a mod's callback goes away when the mod is switched off
+                ModJournal.record(ModJournal.ownerOf(callback.getClass()), "callback",
+                    name + "@" + Integer.toHexString(System.identityHashCode(callback)),
+                    () -> { callbacks.remove(callback); return null; },
+                    () -> { if (!callbacks.contains(callback)) callbacks.add(callback); return null; });
             }
+        }
+
+        /** Number of registered listeners (tests). */
+        public int size() {
+            return callbacks.size();
         }
 
         public void run() {
@@ -51,6 +61,7 @@ public final class Callbacks {
                 try {
                     callback.run();
                 } catch (Throwable t) {
+                    ModGuard.callbackFailed(t, name, callback); // Jumpstart fork: credit it to the mod
                     errCount++;
                     if (errCount < 50) {
                         Logger.printStackTrace(t);

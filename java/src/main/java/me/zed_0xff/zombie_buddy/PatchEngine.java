@@ -360,7 +360,9 @@ public final class PatchEngine {
 
                             try {
                                 ClassFileLocator locator = classFileLocator(transformedJar, modLoader);
-                                result = result.visit(Advice.to(patchClass, locator).on(methodMatcher));
+                                result = result.visit(Advice.to(patchClass, locator)
+                                    .withExceptionHandler(guardHandler(patchClass.getName(), cl))
+                                    .on(methodMatcher));
                                 Logger.debug("Applied advice to " + className + "." + methodName);
                             } catch (Exception e) {
                                 Logger.error("ERROR: Failed to apply advice to " + className + "." + methodName + ": " + e.getMessage());
@@ -424,6 +426,7 @@ public final class PatchEngine {
                             result = result
                                 .method(SyntaxSugar.methodMatcher(methodName))
                                 .intercept(MethodDelegation.to(patchClass));
+                            result = watchDelegation(result, methodName, cl);
                         }
                     }
                     
@@ -492,6 +495,48 @@ public final class PatchEngine {
         // either way the patches stay until the game restarts.
         boolean switchable = firstLoadBuilder == null && delegationPatches.isEmpty();
         return new PatchHandle(installed, targetClasses, switchable, new AtomicBoolean(true));
+    }
+
+    /**
+     * Jumpstart fork, crash protection: the handler Byte Buddy runs when a guarded advice
+     * ({@code suppress = Throwable}, set by the guard pipeline step) throws. It reports the error to
+     * {@link ModGuard}; the game method goes on. A target in a class loader that cannot see
+     * ModGuard (bootstrap classes) only prints the error.
+     */
+    private static Advice.ExceptionHandler guardHandler(String patchClassName, ClassLoader targetLoader) {
+        try {
+            if (targetLoader != null && Class.forName(ModGuard.class.getName(), false, targetLoader) == ModGuard.class) {
+                var failed = new net.bytebuddy.description.method.MethodDescription.ForLoadedMethod(
+                    ModGuard.class.getMethod("adviceFailed", Throwable.class, String.class));
+                return new Advice.ExceptionHandler.Simple(new net.bytebuddy.implementation.bytecode.StackManipulation.Compound(
+                    new net.bytebuddy.implementation.bytecode.constant.TextConstant(patchClassName),
+                    net.bytebuddy.implementation.bytecode.member.MethodInvocation.invoke(failed)));
+            }
+        } catch (ReflectiveOperationException | LinkageError e) {
+            // fall through
+        }
+        return Advice.ExceptionHandler.Default.PRINTING;
+    }
+
+    /**
+     * Jumpstart fork: a MethodDelegation replaces the game method, so its exceptions cannot be
+     * suppressed. They are credited to the mod (and rethrown) so at least the report names it.
+     * Not for constructors (Byte Buddy cannot catch around them).
+     */
+    private static net.bytebuddy.dynamic.DynamicType.Builder<?> watchDelegation(
+            net.bytebuddy.dynamic.DynamicType.Builder<?> builder, String methodName, ClassLoader targetLoader) {
+        if (!ModGuard.isEnabled() || methodName.equals("<init>")) {
+            return builder;
+        }
+        try {
+            if (targetLoader == null || Class.forName(ModGuard.class.getName(), false, targetLoader) != ModGuard.class) {
+                return builder;
+            }
+            return builder.visit(Advice.to(DelegationWatch.class).on(SyntaxSugar.methodMatcher(methodName)));
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+            Logger.debug("guard: cannot watch delegation " + methodName + ": " + e);
+            return builder;
+        }
     }
 
     /** Jumpstart fork: one retransformable transformer for loaded and not-yet-loaded targets. */

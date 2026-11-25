@@ -86,7 +86,7 @@ public final class Hotswap {
         String best = "not loaded";
         for (Path jar : resolve(mod)) {
             String state;
-            if (g_switchedOff.contains(jar)) {
+            if (g_switchedOff.contains(jar) || ModGuard.isTripped(jar)) {
                 state = "off";
             } else {
                 PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(jar);
@@ -293,7 +293,22 @@ public final class Hotswap {
 
         // loadJar re-checks the hash right before it reads the jar, so a swapped file is refused.
         Exposer.Registered before = Exposer.registered();
-        if (!Loader.loadJar(jar, packageName, hash, Loader.Phase.MAIN)) {
+        ModGuard.nameJar(jar, Utils.isBlank(modId) ? jar.getFileName().toString() : modId);
+        boolean loaded;
+        Loader.g_liveLoad.set(Boolean.TRUE);
+        Loader.g_mainFailure.remove();
+        try {
+            loaded = Loader.loadJar(jar, packageName, hash, Loader.Phase.MAIN);
+        } finally {
+            Loader.g_liveLoad.remove();
+        }
+        Throwable mainFailure = Loader.g_mainFailure.get();
+        Loader.g_mainFailure.remove();
+        if (mainFailure != null) {
+            ModJournal.forget(jar); // whatever main() registered before it threw
+            return "main() failed: " + mainFailure;
+        }
+        if (!loaded) {
             return "ZombieBuddy could not load it (see log)";
         }
         String id = Utils.isBlank(modId) ? jar.getFileName().toString() : modId;
@@ -301,6 +316,7 @@ public final class Hotswap {
             id, jar, new ModFlags(ModFlags.MF_ACTIVE), "loaded live", hash, Boolean.TRUE));
         Logger.info("hotswap: loaded " + id + " from " + jar);
         exposeNow(id, before);
+        ModGuard.startProbation(jar);
 
         PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(jar);
         return handle == null || handle.isComplete() ? null : "loaded, but some classes could not be patched (see log)";
@@ -375,18 +391,36 @@ public final class Hotswap {
             switchedOff.add(old);
         }
 
+        // the old version's Lua exposures and callbacks go, so only the new version's stay
+        for (Path old : oldJars) {
+            ModJournal.undo(old);
+        }
+
         Path key = Path.of(jar + "#" + newPackage);
         Exposer.Registered before = Exposer.registered();
+        ModGuard.nameJar(key, modId);
         boolean loaded;
+        Loader.g_liveLoad.set(Boolean.TRUE);
+        Loader.g_mainFailure.remove();
         try {
             loaded = Loader.transformAndLoadJar(key, newPackage, Loader.Phase.MAIN, relocated);
         } catch (RuntimeException e) {
             Logger.error("hotswap: loading the new version of " + modId + " failed: " + e);
             loaded = false;
+        } finally {
+            Loader.g_liveLoad.remove();
         }
-        if (!loaded) {
+        Throwable mainFailure = Loader.g_mainFailure.get();
+        Loader.g_mainFailure.remove();
+        if (!loaded || mainFailure != null) {
+            ModJournal.forget(key);
             switchOnAgain(switchedOff);
-            return "the new version could not be loaded (see log); the old version is on again";
+            for (Path old : oldJars) {
+                ModJournal.redo(old);
+            }
+            return mainFailure != null
+                ? "the new version's main() failed: " + mainFailure + "; the old version is on again"
+                : "the new version could not be loaded (see log); the old version is on again";
         }
 
         for (Path old : oldJars) {
@@ -396,9 +430,77 @@ public final class Hotswap {
             modId, key, new ModFlags(ModFlags.MF_ACTIVE), "updated live", hash, Boolean.TRUE));
         Logger.info("hotswap: updated " + modId + " to " + jar + " as package " + newPackage);
         exposeNow(modId, before);
+        ModGuard.startProbation(key);
 
         PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(key);
         return handle == null || handle.isComplete() ? null : "updated, but some classes could not be patched (see log)";
+    }
+
+    // --- Jumpstart fork: crash protection and uninstall --------------------------------------------
+
+    /**
+     * Called by {@link ModGuard} on its own thread when a mod failed too often: removes its patches
+     * if they are switchable and takes back what it registered. Its advice is already silenced by
+     * the trip wire. Returns null, or why the patches stay until restart.
+     */
+    static synchronized String offByGuard(Path jar) {
+        String problem = g_switchedOff.contains(jar) ? null : switchOff(jar);
+        ModJournal.undo(jar);
+        return problem;
+    }
+
+    /** Jumpstart: the newest crash-protection event number, as a decimal string ("0" if none). */
+    public static String guardLastSeq() {
+        return Long.toString(ModGuard.lastSeq());
+    }
+
+    /**
+     * Jumpstart: crash-protection events newer than {@code sinceSeq}, one per line, fields separated
+     * by tabs: seq, mod id, kind (advice|main|callback|lua|delegation), where, exception (one line),
+     * action (logged|off|refused). "" if there are none.
+     */
+    public static String guardEvents(String sinceSeq) {
+        long since;
+        try {
+            since = Utils.isBlank(sinceSeq) ? 0 : Long.parseLong(sinceSeq.trim());
+        } catch (NumberFormatException e) {
+            since = 0;
+        }
+        return ModGuard.eventsSince(since);
+    }
+
+    /** Jumpstart: "count TAB state" for a mod (state ok, off-by-guard or probation), or "" if unknown. */
+    public static synchronized String guardStatus(String modId) {
+        List<Path> jars = resolve(modId);
+        return jars.isEmpty() ? "" : ModGuard.status(jars);
+    }
+
+    /**
+     * Jumpstart (uninstall): switches every jar of the mod off for good in this session and takes
+     * back everything it registered. Patches that cannot be removed are silenced. The classes stay
+     * until restart. Returns "OK ..." or "FAILED ...".
+     */
+    public static synchronized String forget(String modId) {
+        List<Path> jars = resolve(modId);
+        if (jars.isEmpty()) {
+            return "FAILED " + modId + ": no loaded Java mod with this id or jar";
+        }
+        List<String> kept = new ArrayList<>();
+        for (Path jar : jars) {
+            if (!g_switchedOff.contains(jar) && Loader.g_patch_handles.containsKey(jar)) {
+                String problem = switchOff(jar);
+                if (problem != null) {
+                    kept.add(jar.getFileName() + ": patches silenced until restart (" + problem + ")");
+                }
+            }
+            ModGuard.silence(jar);
+            String left = ModJournal.forget(jar);
+            if (!left.isEmpty()) {
+                kept.add(jar.getFileName() + ": " + left);
+            }
+        }
+        Logger.info("hotswap: forgot " + modId + (kept.isEmpty() ? "" : "; " + String.join("; ", kept)));
+        return "OK " + modId + " forgotten (classes stay until restart)" + (kept.isEmpty() ? "" : "; " + String.join("; ", kept));
     }
 
     private static void switchOnAgain(List<Path> jars) {
@@ -450,7 +552,23 @@ public final class Hotswap {
         }
         List<String> problems = new ArrayList<>();
         for (Path jar : jars) {
-            String problem = off ? switchOff(jar) : switchOn(jar);
+            String problem;
+            if (off) {
+                problem = switchOff(jar);
+                if (problem == null) {
+                    ModJournal.undo(jar);
+                }
+            } else {
+                boolean tripped = ModGuard.isTripped(jar);
+                ModGuard.reset(jar); // counting starts over, with probation
+                problem = switchOn(jar);
+                if (tripped && "was not switched off".equals(problem)) {
+                    problem = null; // only its advice was silenced (not switchable); now it runs again
+                }
+                if (problem == null) {
+                    ModJournal.redo(jar);
+                }
+            }
             if (problem != null) {
                 problems.add(jar.getFileName() + ": " + problem);
             }
@@ -463,7 +581,10 @@ public final class Hotswap {
 
     private static String describe(Path jar) {
         if (g_switchedOff.contains(jar)) {
-            return "off";
+            return ModGuard.isTripped(jar) ? "off (crash protection)" : "off";
+        }
+        if (ModGuard.isTripped(jar)) {
+            return "off (crash protection; its patches stay until restart, but do nothing)";
         }
         PatchEngine.PatchHandle handle = Loader.g_patch_handles.get(jar);
         if (handle == null) {

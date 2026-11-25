@@ -99,6 +99,7 @@ final class EmbeddedMod {
             return;
         }
         Logger.info("loading embedded mod " + mod.packageName() + " from the agent jar");
+        ModGuard.protectPackage(mod.packageName()); // guarded, but never switched off
         Loader.transformAndLoadJar(Path.of(PREFIX + mod.packageName()), mod.packageName(), phase, mod.bytes());
     }
 }

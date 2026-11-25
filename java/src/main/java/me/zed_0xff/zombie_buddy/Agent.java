@@ -90,6 +90,7 @@ public class Agent {
             }
         }
 
+        ModJournal.installPump(); // Jumpstart fork: Lua clean-up of switched-off mods runs on the main thread
         Exposer.exposeAnnotatedClasses(ZombieBuddy.class.getPackage().getName());
 
         String basePkg = ZombieBuddy.class.getPackage().getName();

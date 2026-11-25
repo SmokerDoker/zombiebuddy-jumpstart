@@ -14,6 +14,9 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
@@ -64,7 +67,19 @@ public class Exposer {
 
     static void addClassWithGlobalLuaMethod(Class<?> cls) {
         if (cls != null && hasGlobalLuaMethod(cls)) {
-            g_classesWithGlobalLuaMethod.add(cls);
+            if (g_classesWithGlobalLuaMethod.add(cls)) {
+                ModJournal.record(ModJournal.ownerOf(cls), "lua globals", cls.getName(),
+                    () -> onMain(() -> {
+                        g_classesWithGlobalLuaMethod.remove(cls);
+                        return revertEnv("globals:" + cls.getName());
+                    }),
+                    () -> onMain(() -> {
+                        if (g_classesWithGlobalLuaMethod.add(cls) && LuaManager.exposer != null && LuaManager.env != null) {
+                            exposeGlobalsNow(cls);
+                        }
+                        return null;
+                    }));
+            }
         }
     }
 
@@ -94,6 +109,13 @@ public class Exposer {
             return;
         }
         g_exposed_classes.put(cls, name != null ? name : "");
+        final String luaName = name;
+        ModJournal.record(ModJournal.ownerOf(cls), "lua class", cls.getName(),
+            () -> onMain(() -> unexposeClass(cls)),
+            () -> onMain(() -> {
+                exposeClass(cls, luaName);
+                return null;
+            }));
 
         // trigger class loading, to ensure class static initializers run
         try {
@@ -110,6 +132,11 @@ public class Exposer {
     }
 
     private static void exposeClassNow(Class<?> cls) {
+        String name = g_exposed_classes.get(cls);
+        tracked(cls, "class:" + cls.getName(), Utils.isBlank(name) ? null : name, () -> exposeClassNowInner(cls));
+    }
+
+    private static void exposeClassNowInner(Class<?> cls) {
         var exposer = LuaManager.exposer;
         var env = LuaManager.env;
         String name = g_exposed_classes.get(cls);
@@ -151,7 +178,20 @@ public class Exposer {
             Logger.error("exposeMethod(): cls and methodName must be /non-empty:", cls, methodName);
             return;
         }
-        g_exposed_methods.computeIfAbsent(cls, k -> new HashSet<>()).add(methodName);
+        if (g_exposed_methods.computeIfAbsent(cls, k -> new HashSet<>()).add(methodName)) {
+            ModJournal.record(ModJournal.ownerOf(cls), "lua method", cls.getName() + "." + methodName,
+                () -> onMain(() -> {
+                    HashSet<String> names = g_exposed_methods.get(cls);
+                    if (names != null) {
+                        names.remove(methodName);
+                    }
+                    return revertEnv("method:" + cls.getName() + "#" + methodName);
+                }),
+                () -> onMain(() -> {
+                    exposeMethod(cls, methodName);
+                    return null;
+                }));
+        }
         // If exposer is already available, expose immediately (for mods loaded after initial exposure)
         if (LuaManager.exposer != null && LuaManager.env != null) {
             exposeMethodNow(cls, methodName);
@@ -233,7 +273,8 @@ public class Exposer {
         }
         try {
             Logger.info("Exposing global functions from class: " + cls.getName());
-            LuaManager.exposer.exposeGlobalFunctions(instance);
+            final Object target = instance;
+            tracked(cls, "globals:" + cls.getName(), null, () -> LuaManager.exposer.exposeGlobalFunctions(target));
         } catch (Throwable t) {
             Logger.error("exposeGlobalFunctions(" + cls.getName() + "): " + t.getMessage());
         }
@@ -280,6 +321,11 @@ public class Exposer {
     }
 
     private static void exposeMethodNow(Class<?> cls, String methodName) {
+        tracked(cls, "method:" + cls.getName() + "#" + methodName, cls.getSimpleName() + ".x",
+            () -> exposeMethodNowInner(cls, methodName));
+    }
+
+    private static void exposeMethodNowInner(Class<?> cls, String methodName) {
         var exposer    = LuaManager.exposer;
         var staticBase = LuaManager.env;
 
@@ -409,5 +455,109 @@ public class Exposer {
         } catch (Throwable t) {
             Logger.debug("exposeClassIfAnnotated(" + className + "): " + t.getMessage());
         }
+    }
+    // --- Jumpstart fork: taking a mod's exposures back (ModJournal) ---------------------------------
+
+    /** One value an exposure of a mod class set in a Lua table. */
+    private record EnvChange(KahluaTable table, Object key, Object before, Object after) {
+    }
+
+    /** What the latest exposure of each mod class (by key) changed in Lua; a new Lua start replaces it. */
+    private static final Map<String, List<EnvChange>> g_envChanges = new ConcurrentHashMap<>();
+
+    /**
+     * Runs an exposure; for a mod's class it records which values of {@code env} (and, for a
+     * dotted Lua name, of its existing parent tables) changed, so {@link #revertEnv} can take them back.
+     */
+    private static void tracked(Class<?> cls, String key, String dottedName, Runnable expose) {
+        KahluaTable env = LuaManager.env;
+        if (env == null || ModJournal.ownerOf(cls) == null) {
+            expose.run();
+            return;
+        }
+        List<KahluaTable> tables = new ArrayList<>();
+        tables.add(env);
+        if (dottedName != null) {
+            String[] parts = dottedName.split("[.]");
+            KahluaTable current = env;
+            for (int i = 0; i < parts.length - 1; i++) {
+                Object next = current.rawget(parts[i]);
+                if (!(next instanceof KahluaTable t)) {
+                    break;
+                }
+                tables.add(t);
+                current = t;
+            }
+        }
+        List<Map<Object, Object>> before = new ArrayList<>();
+        for (KahluaTable t : tables) {
+            before.add(snapshot(t));
+        }
+        try {
+            expose.run();
+        } finally {
+            List<EnvChange> changes = new ArrayList<>();
+            for (int i = 0; i < tables.size(); i++) {
+                Map<Object, Object> was = before.get(i);
+                for (var e : snapshot(tables.get(i)).entrySet()) {
+                    Object old = was.get(e.getKey());
+                    if (old != e.getValue()) {
+                        changes.add(new EnvChange(tables.get(i), e.getKey(), old, e.getValue()));
+                    }
+                }
+            }
+            g_envChanges.put(key, changes);
+        }
+    }
+
+    private static Map<Object, Object> snapshot(KahluaTable table) {
+        Map<Object, Object> map = new HashMap<>();
+        var it = table.iterator();
+        while (it.advance()) {
+            map.put(it.getKey(), it.getValue());
+        }
+        return map;
+    }
+
+    /** Puts back what an exposure changed, only where the value is still the mod's. Returns what was kept, or null. */
+    private static String revertEnv(String key) {
+        List<EnvChange> changes = g_envChanges.remove(key);
+        if (changes == null) {
+            return null;
+        }
+        List<String> kept = new ArrayList<>();
+        for (int i = changes.size() - 1; i >= 0; i--) {
+            EnvChange c = changes.get(i);
+            if (c.table().rawget(c.key()) == c.after()) {
+                c.table().rawset(c.key(), c.before());
+            } else {
+                kept.add(String.valueOf(c.key()));
+            }
+        }
+        return kept.isEmpty() ? null : "replaced since, kept: " + String.join(", ", kept);
+    }
+
+    /** Takes a mod's class out of Lua: not exposed again at the next Lua start, and gone now. */
+    static String unexposeClass(Class<?> cls) {
+        g_exposed_classes.remove(cls);
+        String kept = revertEnv("class:" + cls.getName());
+        var exposer = LuaManager.exposer;
+        if (exposer != null) {
+            try {
+                java.lang.reflect.Field f = exposer.getClass().getDeclaredField("exposed");
+                f.setAccessible(true);
+                ((java.util.Set<?>) f.get(exposer)).remove(cls);
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                Logger.debug("unexposeClass: " + e);
+            }
+        }
+        return kept;
+    }
+
+    /** Runs Lua-touching work on the game's main thread; returns its result if it ran right away. */
+    private static String onMain(Supplier<String> work) {
+        String[] out = { null };
+        ModJournal.onMainThread(() -> out[0] = work.get());
+        return out[0];
     }
 }
