@@ -1032,6 +1032,10 @@ public class Loader {
             printModList(modsToLoad);
         }
 
+        // Jumpstart fork: switching mods in the main menu reloads Lua first and loads the jars after
+        // that, so their Lua classes and globals would come only with the next Lua start.
+        Exposer.Registered exposedBefore = Exposer.registered();
+
         // Load only the mods that should be loaded
         for (int i = 0; i < jModInfos.size(); i++) {
             if (!shouldSkipList.get(i)) {
@@ -1041,6 +1045,15 @@ public class Loader {
 
         // Jumpstart fork: a mod built into this agent jar; it came with the agent, so it needs no approval
         EmbeddedMod.load(Phase.MAIN);
+
+        try {
+            int n = Exposer.exposeAddedSince(exposedBefore); // 0 when Lua is not up yet: exposeAll does it
+            if (n > 0) {
+                Logger.info(n + " Lua exposure(s) of mods loaded after Lua started made available");
+            }
+        } catch (Throwable t) {
+            Logger.error("exposing mods loaded after Lua started failed, available after the next load: " + t);
+        }
     }
 
     private static void checkShiftKey() {

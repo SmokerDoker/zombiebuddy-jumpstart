@@ -278,7 +278,7 @@ public final class ModGuard {
     static void callbackFailed(Throwable t, String callbackName, Object callback) {
         try {
             String pkg = callback == null ? null : packageOf(callback.getClass().getName());
-            if (pkg == null) {
+            if (pkg == null || isProtected(pkg)) {
                 pkg = packageFromStack(t);
             }
             if (pkg != null) {
@@ -293,7 +293,8 @@ public final class ModGuard {
         for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
             for (StackTraceElement e : c.getStackTrace()) {
                 String pkg = packageOf(e.getClassName());
-                if (pkg != null) {
+                // ZombieBuddy's own code (e.g. the test Lua server calling Lua) is on many stacks; skip it
+                if (pkg != null && !isProtected(pkg)) {
                     return pkg;
                 }
             }
