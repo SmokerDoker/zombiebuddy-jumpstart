@@ -3,7 +3,10 @@
 
 HMODULE hOrig = NULL;
 
+// The agent jar it loads; Jumpstart builds it as jsNative.dll with -DZB_JAR=\"Jumpstart.jar\".
+#ifndef ZB_JAR
 #define ZB_JAR "ZombieBuddy.jar"
+#endif
 #define AGENT_OPTIONS_MAX 2048
 
 // Minimal DllMain to prevent CRT initialization
