@@ -12,6 +12,11 @@ DEF1=$(NAME).def
 
 all: $(TARGET1)
 
+# Jumpstart: the same loader for Jumpstart.jar (the fork with Jumpstart built in)
+jsNative.dll: $(NAME).c jsNative.def
+	$(CC) $(CFLAGS) -DZB_JAR=\"Jumpstart.jar\" -c $(NAME).c -o jsNative.o
+	$(CC) $(LDFLAGS) -o $@ jsNative.o jsNative.def -lkernel32 -luser32
+
 $(TARGET1): $(OBJECTS1)
 	$(CC) $(LDFLAGS) -o $@ $^ $(DEF1) -lkernel32 -luser32
 
@@ -19,4 +24,4 @@ $(TARGET1): $(OBJECTS1)
 	$(CC) $(CFLAGS) -c $<
 
 clean:
-	rm -f $(OBJECTS1) $(TARGET1)
+	rm -f $(OBJECTS1) $(TARGET1) jsNative.o jsNative.dll
