@@ -1032,6 +1032,10 @@ public class Loader {
             printModList(modsToLoad);
         }
 
+        // Jumpstart fork: switching mods in the main menu reloads Lua first and loads the jars after
+        // that, so their Lua classes and globals would come only with the next Lua start.
+        Exposer.Registered exposedBefore = Exposer.registered();
+
         // Load only the mods that should be loaded
         for (int i = 0; i < jModInfos.size(); i++) {
             if (!shouldSkipList.get(i)) {
@@ -1041,6 +1045,15 @@ public class Loader {
 
         // Jumpstart fork: a mod built into this agent jar; it came with the agent, so it needs no approval
         EmbeddedMod.load(Phase.MAIN);
+
+        try {
+            int n = Exposer.exposeAddedSince(exposedBefore); // 0 when Lua is not up yet: exposeAll does it
+            if (n > 0) {
+                Logger.info(n + " Lua exposure(s) of mods loaded after Lua started made available");
+            }
+        } catch (Throwable t) {
+            Logger.error("exposing mods loaded after Lua started failed, available after the next load: " + t);
+        }
     }
 
     private static void checkShiftKey() {
@@ -1076,6 +1089,11 @@ public class Loader {
     }
 
     private static final Set<String> _known_mains = new HashSet<>();
+
+    /** Jumpstart fork: set by Hotswap while it loads or updates a jar live (a failing main() then refuses the jar). */
+    static final ThreadLocal<Boolean> g_liveLoad = new ThreadLocal<>();
+    /** Jumpstart fork: the exception of the last main() that failed during a live load on this thread. */
+    static final ThreadLocal<Throwable> g_mainFailure = new ThreadLocal<>();
     private static final HashMap<String, EnumSet<Phase>> _known_package_phases = new HashMap<>();
 
     // called by Agent and Loader
@@ -1097,25 +1115,44 @@ public class Loader {
             return false;
         }
 
-        // Load and invoke optional [Pre]Main class
-        String mainClassName = phase == Phase.PREMAIN ? transformed.preMainClassName() : transformed.mainClassName();
-        if (mainClassName == null) {
-            Logger.debug("No " + phase + " class for package " + packageName);
-        } else if (_known_mains.contains(mainClassName)) {
-            Logger.debug("Java " + phase + " class " + mainClassName + " already loaded, skipping.");
-        } else {
-            _known_mains.add(mainClassName);
+        // Jumpstart fork: the guard credits errors to this jar, the journal records what it registers
+        ModGuard.register(jarPath, packageName, transformed.classes().keySet());
+        boolean live = Boolean.TRUE.equals(g_liveLoad.get());
+        Throwable[] mainFailure = { null };
 
-            Class<?> cls = loadMainClass(mainClassName, modLoader);
-            Logger.info("trying to load " + mainClassName + ": " + cls);
-            if (cls != null) {
-                try_call_main(cls, phase);
+        ModJournal.during(jarPath, () -> {
+            // Load and invoke optional [Pre]Main class
+            String mainClassName = phase == Phase.PREMAIN ? transformed.preMainClassName() : transformed.mainClassName();
+            if (mainClassName == null) {
+                Logger.debug("No " + phase + " class for package " + packageName);
+            } else if (_known_mains.contains(mainClassName)) {
+                Logger.debug("Java " + phase + " class " + mainClassName + " already loaded, skipping.");
+            } else {
+                _known_mains.add(mainClassName);
+
+                Class<?> cls = loadMainClass(mainClassName, modLoader);
+                Logger.info("trying to load " + mainClassName + ": " + cls);
+                if (cls != null) {
+                    mainFailure[0] = try_call_main(cls, phase);
+                }
             }
-        }
+            if (mainFailure[0] != null) {
+                ModGuard.mainFailed(jarPath, packageName, mainFailure[0], live);
+                if (live) {
+                    return; // a live load stops here: no exposures, no patches
+                }
+            }
 
-        // only apply patches on the first phase that loads this package
+            // only apply patches on the first phase that loads this package
+            if (phases.size() == 1) {
+                Exposer.exposeClassesFromPackage(modLoader, transformed.classes().keySet(), packageName);
+            }
+        });
+        if (mainFailure[0] != null && live) {
+            g_mainFailure.set(mainFailure[0]);
+            return false;
+        }
         if (phases.size() == 1) {
-            Exposer.exposeClassesFromPackage(modLoader, transformed.classes().keySet(), packageName);
             g_patch_handles.put(jarPath, PatchEngine.applyPatches(transformed.patches(), modLoader, transformed));
         }
         return true;
@@ -1133,20 +1170,23 @@ public class Loader {
         return Reflect.on(mainClassName).getType();
     }
 
-    static void try_call_main(Class<?> cls, Phase phase) {
+    /** Calls the mod's main()/premain(). Returns what it threw, or null. */
+    static Throwable try_call_main(Class<?> cls, Phase phase) {
         final String methodName = phase == Phase.PREMAIN ? "premain" : "main";
 
         MethodHandle mh = Reflect.on(cls).getMethodHandle(void.class, new Class<?>[] { String[].class }, methodName);
         if (mh == null) {
-            return;
+            return null;
         }
 
         try {
             String[] args = {}; // no arguments for now
             mh.invoke((Object) args);
             Logger.info(cls + ": method " + methodName + "() invoked successfully");
+            return null;
         } catch (Throwable t) {
             Logger.error(cls + ": error invoking " + methodName + "(): " + t);
+            return t;
         }
     }
 

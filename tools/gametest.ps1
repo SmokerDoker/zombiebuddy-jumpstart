@@ -17,10 +17,16 @@
   gradle shadowJarExperimental (the player jar from shadowJar has no Lua server).
 
   Both ZBHelloWorld jars are approved only in the test config; they are verified in BiteCheck.
+
+  Crash protection: the test mod ZBCrashTest (build it in java\ with gradle zbCrashTestMod) is
+  loaded at start. Armed from Lua, its patch throws in MainScreenState.render every frame; the game
+  must keep running, the guard must switch the mod off, take back its Lua functions, and log its
+  file write; switched on again, everything is back.
 #>
 param(
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\ProjectZomboid",
     [string]$Jar = (Join-Path $PSScriptRoot "..\java\build\jdk25\libs\zombiebuddy-jumpstart-experimental.jar"),
+    [string]$CrashMod = (Join-Path $PSScriptRoot "..\java\build\jdk25\testmods\ZBCrashTest"),
     [string]$TestDir = "$env:USERPROFILE\Zomboid-jumpstart-test",
     [switch]$KeepRunning
 )
@@ -33,7 +39,10 @@ if (-not (Test-Path "$t\mods\ZBHelloWorld")) {
     git clone -q --depth 1 https://github.com/zed-0xff/ZBHelloWorld "$t\mods\ZBHelloWorld"
 }
 Copy-Item (Resolve-Path $Jar) "$t\ZombieBuddy-fork.jar" -Force
-$modsTxt = "VERSION = 1,`r`n`r`nmods`r`n{`r`n    mod = ZombieBuddy,`r`n    mod = ZBHelloWorld,`r`n}`r`n`r`nmaps`r`n{`r`n}`r`n"
+if (Test-Path "$t\mods\ZBCrashTest") { Remove-Item "$t\mods\ZBCrashTest" -Recurse -Force }
+Copy-Item (Resolve-Path $CrashMod) "$t\mods\ZBCrashTest" -Recurse
+Remove-Item "$t\.zombie_buddy\guard" -Recurse -Force -ErrorAction SilentlyContinue
+$modsTxt = "VERSION = 1,`r`n`r`nmods`r`n{`r`n    mod = ZombieBuddy,`r`n    mod = ZBHelloWorld,`r`n    mod = ZBCrashTest,`r`n}`r`n`r`nmaps`r`n{`r`n}`r`n"
 [IO.File]::WriteAllText("$t\mods\default.txt", $modsTxt)
 $agent = "-javaagent:$t\ZombieBuddy-fork.jar=hotswap=true,hotswap_lua=true,experimental,lua_server_port=4444,policy=deny-new,config_dir=$t\.zombie_buddy"
 $startCmd = "@echo off`r`ncd /d `"$GameDir`"`r`n`".\jre64\bin\java.exe`" $agent -Djava.awt.headless=true --enable-native-access=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Dzomboid.steam=1 -Dzomboid.znetlog=1 -XX:-CreateCoredumpOnCrash -XX:-OmitStackTraceInFastThrow -XX:+UseZGC -Xmx6000m -Djava.library.path=./win64/;./ -cp ./;projectzomboid.jar zombie.gameStates.MainScreenState -cachedir=$t > `"$t\game-out.txt`" 2>&1`r`n"
@@ -67,10 +76,12 @@ Remove-Item $result -ErrorAction SilentlyContinue
 $failures = 0
 Log "gametest $(Get-Date -Format s)"
 
-# both ZBHelloWorld jars are BiteCheck-verified; approve them in the test config only
+# both ZBHelloWorld jars are BiteCheck-verified; approve them and our own test mod in the test config only
+$crashHash = (Get-FileHash "$t\mods\ZBCrashTest\42\media\java\client\ZBCrashTest.jar" -Algorithm SHA256).Hash.ToLower()
 $approvals = '{"formatVersion": 2, "mods": [' +
   '{"id": "ZBHelloWorld", "jar_hash": "73ea63e2d02099a1b5f4770c05d3e79cb63d9533e5095ca75f12dc21a136dbc8", "decision": true},' +
-  '{"id": "ZBHelloWorld", "jar_hash": "817cde27c290801c6f121d1e0d1ba6fb8baa1c4a133d268e4927e55e3ccddba2", "decision": true}]}'
+  '{"id": "ZBHelloWorld", "jar_hash": "817cde27c290801c6f121d1e0d1ba6fb8baa1c4a133d268e4927e55e3ccddba2", "decision": true},' +
+  '{"id": "ZBCrashTest", "jar_hash": "' + $crashHash + '", "decision": true}]}'
 [IO.File]::WriteAllText("$t\.zombie_buddy\mod_approvals.json", $approvals)
 
 if (-not (GameProcess)) {
@@ -82,7 +93,7 @@ $deadline = (Get-Date).AddMinutes(4)
 do { Start-Sleep 5; $status = Lua "return ZombieBuddy.Hotswap.status()" } until ($status -like '*ZBHelloWorld*' -or (Get-Date) -gt $deadline)
 if ($status -notlike '*ZBHelloWorld*') {
     Log "ZBHelloWorld not loaded yet, activating it like the mod menu does"
-    Lua 'local am = ActiveMods.getById("default") am:setModActive("ZombieBuddy", true) am:setModActive("ZBHelloWorld", true) saveModsFile() getCore():ResetLua("default", "modsChanged") return 1' | Out-Null
+    Lua 'local am = ActiveMods.getById("default") am:setModActive("ZombieBuddy", true) am:setModActive("ZBHelloWorld", true) am:setModActive("ZBCrashTest", true) saveModsFile() getCore():ResetLua("default", "modsChanged") return 1' | Out-Null
     $deadline = (Get-Date).AddMinutes(2)
     do { Start-Sleep 5; $status = Lua "return ZombieBuddy.Hotswap.status()" } until ($status -like '*ZBHelloWorld*' -or (Get-Date) -gt $deadline)
 }
@@ -104,11 +115,31 @@ Check "on after update"        (Lua "return ZombieBuddy.Hotswap.on('ZBHelloWorld
 Check "patch back (v2)"        (Has) "true"
 Log "status: $(Lua 'return ZombieBuddy.Hotswap.status()')"
 
+# --- crash protection (ZBCrashTest) -------------------------------------------------------------
+$guardDir = "$t\.zombie_buddy\guard"
+Check "ZBCrashTest loaded"              (Lua "return ZombieBuddy.Hotswap.stateOf('ZBCrashTest')") '"on"'
+Check "its Lua function is there"       (Lua "return type(zbCrashArm)") '"function"'
+Check "its static write"                (Lua "return zbCrashWrites()") '"zbcrashtest"'
+Check "its file write is logged"        ([bool](Select-String -Path "$guardDir\files-ZBCrashTest.txt" -Pattern 'zbcrashtest.txt' -Quiet -ErrorAction SilentlyContinue)) $true
+Lua "return zbCrashArm(2)" | Out-Null
+Start-Sleep 5
+Check "game survives the throwing render patch" (Lua "return 'pong'") '"pong"'
+Check "ZBCrashTest switched off by the guard"   (Lua "return ZombieBuddy.Hotswap.stateOf('ZBCrashTest')") '"off"'
+Check "guard status off-by-guard"       ((Lua "return ZombieBuddy.Guard.modStatus('ZBCrashTest')") -like '*off-by-guard*') $true
+Check "its Lua functions are taken back" (Lua "return type(zbCrashArm)") '"nil"'
+Check "a report file was written"       ([bool](Get-ChildItem $guardDir -Filter "*-ZBCrashTest.txt" -ErrorAction SilentlyContinue)) $true
+Check "switched on again"               (Lua "return ZombieBuddy.Hotswap.on('ZBCrashTest')") '"OK ZBCrashTest on"'
+Start-Sleep 3
+Check "on after the arm ran out"        (Lua "return ZombieBuddy.Hotswap.stateOf('ZBCrashTest')") '"on"'
+Check "its Lua function is back"        (Lua "return type(zbCrashArm)") '"function"'
+Check "its static write is back"        (Lua "return zbCrashWrites()") '"zbcrashtest"'
+Log "guard: $(Lua 'return ZombieBuddy.Guard.status()')"
+
 Start-Sleep 5
 $alive = [bool](GameProcess)
 Check "game still running" $alive $true
 Log "hotswap log lines:"
-Select-String -Path "$t\game-out.txt" -Pattern 'hotswap' | ForEach-Object { Log ("  " + $_.Line) }
+Select-String -Path "$t\game-out.txt" -Pattern 'hotswap|guard:|journal:' | ForEach-Object { Log ("  " + $_.Line) }
 Log "failures: $failures"
 
 if (-not $KeepRunning) {

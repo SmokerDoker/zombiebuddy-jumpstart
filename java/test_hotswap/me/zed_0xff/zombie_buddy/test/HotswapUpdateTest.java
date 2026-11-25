@@ -13,6 +13,7 @@ import java.util.HexFormat;
 import org.junit.jupiter.api.Test;
 
 import me.zed_0xff.zombie_buddy.Agent;
+import me.zed_0xff.zombie_buddy.GuardAccess;
 import me.zed_0xff.zombie_buddy.Hotswap;
 import testjar.HotswapUpdateTarget;
 
@@ -35,6 +36,7 @@ public class HotswapUpdateTest {
 
         assertNull(Hotswap.load(v1, PACKAGE, MOD));
         assertEquals("vanilla +v1", target.greet());
+        assertEquals(java.util.List.of(PACKAGE + ".UpdateApi"), exposedApis());
 
         String clash = Hotswap.load(v2, PACKAGE, MOD);
         assertTrue(clash != null && clash.contains("use update"), clash);
@@ -42,6 +44,8 @@ public class HotswapUpdateTest {
 
         assertNull(Hotswap.update(v2, PACKAGE, MOD));
         assertEquals("vanilla +v2", target.greet());
+        // only the new version's Lua class is exposed: the old one's was taken back
+        assertEquals(java.util.List.of("jsv2." + PACKAGE + ".UpdateApi"), exposedApis());
         assertEquals("on", Hotswap.stateOf(MOD), "the new version counts, not the old one that is off");
 
         assertEquals("OK " + MOD + " off", Hotswap.off(MOD));
@@ -52,6 +56,11 @@ public class HotswapUpdateTest {
         // a second update of the same jar gets the next package and works the same way
         assertNull(Hotswap.update(v1, PACKAGE, MOD));
         assertEquals("vanilla +v1", target.greet());
+        assertEquals(java.util.List.of("jsv3." + PACKAGE + ".UpdateApi"), exposedApis());
+    }
+
+    private static java.util.List<String> exposedApis() {
+        return GuardAccess.exposedClasses().stream().filter(n -> n.endsWith("hotswapupdate.UpdateApi")).sorted().toList();
     }
 
     @Test

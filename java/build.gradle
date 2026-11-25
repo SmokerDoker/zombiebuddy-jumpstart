@@ -275,9 +275,54 @@ sourceSets {
         }
         compileClasspath += main.output
     }
+    // Jumpstart fork: crash protection and journal tests (see ModGuard, ModJournal)
+    hotswapcrash {
+        java {
+            srcDirs = ['hotswapcrash']
+            include '**/*.java'
+        }
+        compileClasspath += main.output + testjar.output
+    }
+    hotswapcrashlive {
+        java {
+            srcDirs = ['hotswapcrashlive']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
+    hotswapmainfail {
+        java {
+            srcDirs = ['hotswapmainfail']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
+    hotswapjournal {
+        java {
+            srcDirs = ['hotswapjournal']
+            include '**/*.java'
+        }
+        compileClasspath += main.output + testjar.output + files(GAME_CLASSPATH)
+    }
+    // Jumpstart fork: ZBCrashTest, the in-game test mod for the crash protection (tools/gametest.ps1)
+    zbcrashtest {
+        java {
+            srcDirs = ['zbcrashtest/src']
+            include '**/*.java'
+        }
+        compileClasspath += main.output + files(GAME_CLASSPATH)
+    }
     testHotswap {
         java {
             srcDirs = ['test_hotswap']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+        runtimeClasspath += main.output
+    }
+    testGuard {
+        java {
+            srcDirs = ['test_guard']
             include '**/*.java'
         }
         compileClasspath += main.output
@@ -507,6 +552,45 @@ task hotswapupdateV2Jar(type: Jar) {
     dependsOn compileHotswapupdatev2Java
 }
 
+// Jumpstart fork: crash protection and journal test jars
+task hotswapcrashJar(type: Jar) {
+    archiveBaseName.set("hotswapcrash")
+    from sourceSets.hotswapcrash.output
+    dependsOn compileHotswapcrashJava
+}
+task hotswapcrashliveJar(type: Jar) {
+    archiveBaseName.set("hotswapcrashlive")
+    from sourceSets.hotswapcrashlive.output
+    dependsOn compileHotswapcrashliveJava
+}
+task hotswapmainfailJar(type: Jar) {
+    archiveBaseName.set("hotswapmainfail")
+    from sourceSets.hotswapmainfail.output
+    dependsOn compileHotswapmainfailJava
+}
+task hotswapjournalJar(type: Jar) {
+    archiveBaseName.set("hotswapjournal")
+    from sourceSets.hotswapjournal.output
+    dependsOn compileHotswapjournalJava
+}
+
+// Jumpstart fork: the ZBCrashTest mod folder for the in-game test (build/jdk25/testmods/ZBCrashTest)
+task zbCrashTestJar(type: Jar) {
+    archiveFileName.set("ZBCrashTest.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("zbcrashtest"))
+    from sourceSets.zbcrashtest.output
+    dependsOn compileZbcrashtestJava
+}
+task zbCrashTestMod(type: Sync) {
+    description = 'Builds the ZBCrashTest mod folder for tools/gametest.ps1'
+    group = 'build'
+    into layout.buildDirectory.dir("testmods/ZBCrashTest")
+    from('zbcrashtest/mod')
+    from(zbCrashTestJar) {
+        into '42/media/java/client'
+    }
+}
+
 // Add testjar JAR as test dependency
 dependencies {
     testImplementation files(tasks.named('testJar'))
@@ -528,6 +612,12 @@ dependencies {
     testHotswapImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
     testHotswapRuntimeOnly 'org.junit.platform:junit-platform-launcher:6.1.3'
     testHotswapRuntimeOnly files(GAME_CLASSPATH)
+
+    // Jumpstart fork: trip wire without hotswap
+    testGuardImplementation files(tasks.named('testJar'))
+    testGuardImplementation 'org.junit.jupiter:junit-jupiter:6.1.3'
+    testGuardRuntimeOnly 'org.junit.platform:junit-platform-launcher:6.1.3'
+    testGuardRuntimeOnly files(GAME_CLASSPATH)
 }
 
 // Configure all test tasks to always run and output test results
@@ -613,6 +703,10 @@ task test_hotswap(type: Test) {
     dependsOn hotswapliveJar
     dependsOn hotswapupdateV1Jar
     dependsOn hotswapupdateV2Jar
+    dependsOn hotswapcrashJar
+    dependsOn hotswapcrashliveJar
+    dependsOn hotswapmainfailJar
+    dependsOn hotswapjournalJar
     dependsOn shadowJar
 
     testClassesDirs = sourceSets.testHotswap.output.classesDirs
@@ -620,6 +714,12 @@ task test_hotswap(type: Test) {
 
     def patchesJarPath = hotswappatchesJar.archiveFile.get().asFile.absolutePath
     def patchesPackageName = "me.zed_0xff.zombie_buddy.hotswappatches"
+    def crashJarPath = hotswapcrashJar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.hotswapCrashJar', crashJarPath
+    systemProperty 'zb.test.hotswapCrashLiveJar', hotswapcrashliveJar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.hotswapMainFailJar', hotswapmainfailJar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.hotswapJournalJar', hotswapjournalJar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.journalFile', layout.buildDirectory.file("hotswap-journal-written.txt").get().asFile.absolutePath
     systemProperty 'zb.test.hotswapJar', patchesJarPath
     systemProperty 'zb.test.hotswapLiveJar', hotswapliveJar.archiveFile.get().asFile.absolutePath
     systemProperty 'zb.test.hotswapUpdateV1Jar', hotswapupdateV1Jar.archiveFile.get().asFile.absolutePath
@@ -631,7 +731,33 @@ task test_hotswap(type: Test) {
         def gsonJar = configurations.runtimeClasspath.find { it.name.contains("gson") }
         if (!gsonJar) throw new GradleException("gson jar not found in runtimeClasspath")
         jvmArgs "-Xbootclasspath/a:${gsonJar}"
-        jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${patchesJarPath}:${patchesPackageName},config_dir=${hotswapConfigDir},prop_prefix=zb,hotswap=true"
+        jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${patchesJarPath}:${patchesPackageName};${crashJarPath}:me.zed_0xff.zombie_buddy.hotswapcrash,config_dir=${hotswapConfigDir},prop_prefix=zb,hotswap=true"
+    }
+}
+
+// Jumpstart fork: the crash protection's trip wire without hotswap (patches cannot be removed)
+// Run with: gradle test_guard
+task test_guard(type: Test) {
+    description = 'Runs the crash-protection test without hotswap (trip wire) from test_guard directory'
+    group = 'verification'
+
+    useJUnitPlatform()
+    dependsOn testJar
+    dependsOn hotswapcrashJar
+    dependsOn shadowJar
+
+    testClassesDirs = sourceSets.testGuard.output.classesDirs
+    classpath = sourceSets.testGuard.runtimeClasspath
+
+    def crashJarPath = hotswapcrashJar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.hotswapCrashJar', crashJarPath
+    def guardConfigDir = layout.buildDirectory.dir("guard-config").get().asFile.absolutePath
+
+    doFirst {
+        def gsonJar = configurations.runtimeClasspath.find { it.name.contains("gson") }
+        if (!gsonJar) throw new GradleException("gson jar not found in runtimeClasspath")
+        jvmArgs "-Xbootclasspath/a:${gsonJar}"
+        jvmArgs "-javaagent:${shadowJar.archiveFile.get().asFile.absolutePath}=patches_jar=${crashJarPath}:me.zed_0xff.zombie_buddy.hotswapcrash,config_dir=${guardConfigDir},prop_prefix=zb,guard=switch,guard_limit=1"
     }
 }
 
@@ -660,6 +786,7 @@ tasks.named('test', Test) {
     dependsOn test_vanilla
     dependsOn test_patched
     dependsOn test_hotswap
+    dependsOn test_guard
     
     // Don't fail if no tests are discovered (since we're not running any here)
     failOnNoDiscoveredTests = false
