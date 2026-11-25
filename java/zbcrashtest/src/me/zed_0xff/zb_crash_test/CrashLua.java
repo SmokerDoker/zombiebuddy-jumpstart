@@ -11,6 +11,12 @@ public class CrashLua {
         return true;
     }
 
+    /** How often the render patch ran; the test checks it grows. */
+    @LuaMethod(name = "zbCrashCalls", global = true)
+    public double calls() {
+        return PatchRender.calls;
+    }
+
     /** The static field Main wrote into the game (zombie.network.GameClient.ip). */
     @LuaMethod(name = "zbCrashWrites", global = true)
     public String writes() {
