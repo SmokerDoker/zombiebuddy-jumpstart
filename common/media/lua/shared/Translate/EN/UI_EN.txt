@@ -13,6 +13,9 @@ UI_EN = {
                             "<IMAGECENTRE:SCREENSHOT_PLACEHOLDER>",
     UI_ZB_SuppressSandboxLog = "Suppress sandbox options logging",
     UI_ZB_WatermarkOpacity = "Watermark Opacity",
+    UI_ZB_Install_Jumpstart = "<H1> Jumpstart is not running. <LINE> <LINE> <TEXT> ZombieBuddy is built into Jumpstart.jar in the game folder. It did not start with the game. <LINE> <LINE> " ..
+                              "<H2> Open Jumpstart and press Install or Repair. <LINE> <TEXT> It puts Jumpstart.jar back and sets the start option <H2>-javaagent:Jumpstart.jar=hotswap=true<TEXT>. Then restart the game. <LINE> <LINE> " ..
+                              "<TEXT> Download: %1",
     UI_ZB_Install_Unix = "<H1> ZombieBuddy requires manual installation. <LINE> " ..
                          "<LINE> " ..
                          "<H2> Please copy the following files: <LINE> " ..
