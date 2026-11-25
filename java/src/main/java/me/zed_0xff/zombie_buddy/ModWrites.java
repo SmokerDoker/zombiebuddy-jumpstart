@@ -93,13 +93,14 @@ public final class ModWrites {
         Write fresh = new Write(f, f.get(null));
         g_writes.put(key, fresh);
         String what = f.getDeclaringClass().getName() + "." + f.getName();
-        Logger.info("journal: " + ModGuard.modIdOfPackage(pkg) + " writes " + what + " (was " + fresh.original + ")");
+        // field names only: a game field can hold a server address or a password, and logs get shared
+        Logger.info("journal: " + ModGuard.modIdOfPackage(pkg) + " writes " + what + " (" + f.getType().getSimpleName() + ")");
         ModJournal.record(jar, "static field", what,
             () -> {
                 try {
                     Object now = f.get(null);
                     if (!same(now, fresh.last)) {
-                        return "changed since (" + now + "), kept";
+                        return "changed since, kept";
                     }
                     f.set(null, fresh.original);
                     return null;
