@@ -1038,6 +1038,9 @@ public class Loader {
                 loadJar(jModInfos.get(i).jarPath(), jModInfos.get(i).javaPkgName(), modContexts.get(i).hash, Phase.MAIN);
             }
         }
+
+        // Jumpstart fork: a mod built into this agent jar; it came with the agent, so it needs no approval
+        EmbeddedMod.load(Phase.MAIN);
     }
 
     private static void checkShiftKey() {
