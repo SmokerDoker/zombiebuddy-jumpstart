@@ -168,9 +168,30 @@ final class ModJarInjector {
     static Map<String, Class<?>> injectInOrder(ClassInjector injector, Map<String, byte[]> classes) {
         Map<String, Class<?>> injected = new LinkedHashMap<>();
         for (String name : definitionOrder(classes)) {
-            injected.putAll(injector.injectRaw(Map.of(name, classes.get(name))));
+            try {
+                injected.putAll(injector.injectRaw(Map.of(name, classes.get(name))));
+            } catch (RuntimeException | LinkageError e) {
+                String missing = missingType(e);
+                if (missing == null) {
+                    throw e;
+                }
+                // Jumpstart fork: a class whose supertype is in neither the jar nor the game (for
+                // example a mod's entry point for another runtime) cannot be defined. A class loader
+                // would only fail when something uses it; skip it instead of failing the whole mod.
+                Logger.warn("skipped " + name + ": it needs " + missing + ", which is not there");
+            }
         }
         return injected;
+    }
+
+    /** The type a NoClassDefFoundError somewhere in the causes names, or null. */
+    static String missingType(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof NoClassDefFoundError) {
+                return String.valueOf(t.getMessage()).replace('/', '.');
+            }
+        }
+        return null;
     }
 
     /** Class names in an order where every superclass and interface in the map comes first. */
