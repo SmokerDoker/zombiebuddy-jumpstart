@@ -49,4 +49,21 @@ public class ModJarInjectorOrderTest {
         classes.put("a.Impl", type("a.Impl", "java.util.ArrayList", "java.lang.Runnable"));
         assertEquals(List.of("a.Impl"), ModJarInjector.definitionOrder(classes));
     }
+
+    @Test
+    void aClassWhoseSupertypeIsNowhereIsSkippedNotTheWholeJar() {
+        Map<String, byte[]> classes = new HashMap<>();
+        classes.put("knoxtest.Good", type("knoxtest.Good", "java.lang.Object"));
+        classes.put("knoxtest.OtherRuntimeEntry", type("knoxtest.OtherRuntimeEntry", "java.lang.Object", "otherruntime.api.Module"));
+        ClassLoader loader = new java.net.URLClassLoader(new java.net.URL[0], getClass().getClassLoader());
+        Map<String, Class<?>> injected = ModJarInjector.injectInOrder(
+                new net.bytebuddy.dynamic.loading.ClassInjector.UsingReflection(loader), classes);
+        assertEquals(List.of("knoxtest.Good"), List.copyOf(injected.keySet()));
+    }
+
+    @Test
+    void namesTheMissingType() {
+        assertEquals("a.b.C", ModJarInjector.missingType(new IllegalStateException(new NoClassDefFoundError("a/b/C"))));
+        assertEquals(null, ModJarInjector.missingType(new IllegalStateException("other")));
+    }
 }
