@@ -19,7 +19,7 @@ public class Patch_ZomboidFileSystem {
     public class Patch_loadMods1 {
         /** Jumpstart fork: the first load of "default" is a lean main menu (LeanMenu); true skips the game's own. */
         @Patch.OnEnter(skipOn = true)
-        public static boolean enter(@Patch.This Object self, String activeMods) {
+        public static boolean enter(@Patch.This Object self, @Patch.Argument(0) String activeMods) {
             Loader.onEnterLoadMods(activeMods);
             return me.zed_0xff.zombie_buddy.LeanMenu.loadInstead((zombie.ZomboidFileSystem) self, activeMods);
         }
