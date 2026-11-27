@@ -12,6 +12,9 @@ import testjar.CrashSwitch;
 public class PatchCrashTarget {
     @Patch.OnEnter(skipOn = true)
     public static boolean enter() {
+        if (CrashSwitch.helper == null) {
+            CrashSwitch.helper = new CrashHelper();
+        }
         if (CrashSwitch.enter) {
             throw new NullPointerException("crash test");
         }

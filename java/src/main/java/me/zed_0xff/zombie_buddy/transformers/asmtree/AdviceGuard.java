@@ -33,6 +33,15 @@ import me.zed_0xff.zombie_buddy.transformers.Pipeline;
  *       Switching a mod off through the guard silences it at once, even when its patches cannot be
  *       removed (no hotswap, or a MethodDelegation patch in the same jar).</li>
  * </ul>
+ * The trip wire also goes into every other method of the mod's classes: a mod that is off cannot run
+ * through a callback, a listener, a task or a Lua-exposed method it left behind either, and every such
+ * call is counted ({@link ModGuard#callsWhileOff}: something still holds the mod). Left out:
+ * constructors and static initializers (nothing may run before {@code super()}), abstract, native and
+ * bridge methods, {@code equals}, {@code hashCode}, {@code toString}, {@code compareTo} (the game's
+ * collections that hold the mod's objects must keep working), classes with a MethodDelegation patch
+ * (their methods stand in for the game's: silencing them would take the game's method away), classes
+ * outside the mod's own package (a library it ships under the library's name may serve other mods
+ * too) and class files older than Java 6 (no stack map frames).
  * Not for the agent option {@code guard=off} or packages in {@code guard_exempt}; no trip wire for
  * ZombieBuddy's own patches and the embedded mod, which are never switched off.
  */
@@ -55,10 +64,17 @@ public class AdviceGuard extends AbstractTransformer {
             return false;
         }
         boolean tripWire = !ModGuard.isProtected(pkg);
+        // the other methods only in the mod's own package (a library it ships under its own name, say
+        // com.google.gson, may serve other mods too) and in class files with stack map frames (Java 6+)
+        boolean everyMethod = tripWire && !isDelegationPatch(cn) && cn.name.startsWith(pkg.replace('.', '/') + "/")
+                && (cn.version & 0xFFFF) >= Opcodes.V1_6;
         boolean changed = false;
         for (MethodNode mn : cn.methods) {
             AnnotationNode advice = adviceAnnotation(mn);
             if (advice == null) {
+                if (everyMethod && wireable(mn)) {
+                    changed |= addTripWire(mn, ModGuard.idFor(pkg));
+                }
                 continue;
             }
             changed |= suppressThrowable(advice);
@@ -67,6 +83,36 @@ public class AdviceGuard extends AbstractTransformer {
             }
         }
         return changed;
+    }
+
+    private static final java.util.Set<String> UNWIRED = java.util.Set.of(
+            "<init>", "<clinit>", "equals", "hashCode", "toString", "compareTo", "finalize", "clone");
+
+    /** A method that gets the trip wire besides advice (see the class comment). */
+    static boolean wireable(MethodNode mn) {
+        if ((mn.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE | Opcodes.ACC_BRIDGE)) != 0) {
+            return false;
+        }
+        return !UNWIRED.contains(mn.name) && mn.instructions != null && mn.instructions.size() > 0;
+    }
+
+    /** A class with {@code @Patch(..., isAdvice = false)}: its methods replace game methods. */
+    static boolean isDelegationPatch(ClassNode cn) {
+        for (java.util.List<AnnotationNode> list : java.util.Arrays.asList(cn.visibleAnnotations, cn.invisibleAnnotations)) {
+            if (list == null) {
+                continue;
+            }
+            for (AnnotationNode an : list) {
+                if (an.desc != null && an.desc.endsWith("/Patch;") && an.values != null) {
+                    for (int i = 0; i + 1 < an.values.size(); i += 2) {
+                        if ("isAdvice".equals(an.values.get(i)) && Boolean.FALSE.equals(an.values.get(i + 1))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private static AnnotationNode adviceAnnotation(MethodNode mn) {
