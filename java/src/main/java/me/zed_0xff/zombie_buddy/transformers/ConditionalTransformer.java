@@ -4,6 +4,7 @@ import java.util.function.Supplier;
 
 /*
  * A Publicizer that only publicizes members if the previous transformers made changes to annotations.
+ * Jumpstart fork: or if the class shares a nest with a patch class (see PatchNests).
  */
 public class ConditionalTransformer extends Transformer {
     private final Supplier<? extends Transformer> factory;
@@ -14,7 +15,7 @@ public class ConditionalTransformer extends Transformer {
 
     @Override
     public Result transform(byte[] classBytes, ClassContext ctx) {
-        return ctx.isAnnChanged()
+        return ctx.isAnnChanged() || ctx.jarContext().inPatchNest(ctx.className())
             ? factory.get().transform(classBytes, ctx)
             : NOOP_RESULT;
     }
