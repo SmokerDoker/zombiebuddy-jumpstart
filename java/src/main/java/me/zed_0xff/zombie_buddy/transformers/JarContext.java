@@ -5,6 +5,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -54,6 +55,7 @@ public class JarContext implements Closeable {
     private TypePool                  m_curPool = null;
     private final Map<String, String> m_shadowDescriptorMappings = new HashMap<>(); // shadow internal name → target internal name
     private final Map<String, ShadowContext> m_shadowContexts = new HashMap<>(); // target binary name → access metadata
+    private Set<String>                 m_patchNests = Set.of(); // Jumpstart fork: see PatchNests
 
     /**
      * {@link TypePool.Default.ReaderMode#FAST} skips {@code Code}, so {@code LocalVariableTable} names never bind to parameters. {@link TypePool.Default.ReaderMode#EXTENDED}
@@ -148,6 +150,15 @@ public class JarContext implements Closeable {
         m_newClassBytes.put(className, classBytes);
         m_curLocator = null;
         m_curPool = null;
+    }
+
+    /** Jumpstart fork: the classes in a nest with a patch class ({@link PatchNests}). */
+    public void setPatchNests(Set<String> patchNests) {
+        m_patchNests = Set.copyOf(patchNests);
+    }
+
+    public boolean inPatchNest(String className) {
+        return m_patchNests.contains(className);
     }
 
     public boolean hasNew() {

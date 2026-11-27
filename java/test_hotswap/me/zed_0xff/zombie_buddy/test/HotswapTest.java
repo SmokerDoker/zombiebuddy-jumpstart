@@ -45,6 +45,11 @@ public class HotswapTest {
     }
 
     @Test
+    void aNestedPatchReadsAPrivateFieldOfTheClassAroundIt() {
+        assertEquals(42, new HotswapTarget().answer());
+    }
+
+    @Test
     void refusesWhatItCannotDo() throws Exception {
         Path jar = patchJar();
         assertEquals("already on", Hotswap.switchOn(jar));

@@ -5,4 +5,8 @@ public class HotswapTarget {
     public String greet() {
         return "vanilla";
     }
+
+    public int answer() {
+        return 0;
+    }
 }

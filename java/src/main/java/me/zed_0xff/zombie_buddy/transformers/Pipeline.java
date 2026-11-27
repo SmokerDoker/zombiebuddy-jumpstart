@@ -173,6 +173,7 @@ public final class Pipeline {
 
     public void transformJarClasses(JarContext jctx, List<String> classNames) {
         Unshadow.collectShadowDescriptorMappings(jctx, classNames);
+        jctx.setPatchNests(PatchNests.of(jctx, classNames)); // Jumpstart fork
 
         for (String className : classNames) {
             byte[] classBytes = jctx.getClassBytes(className);
