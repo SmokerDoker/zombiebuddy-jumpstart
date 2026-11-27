@@ -571,12 +571,20 @@ public class Loader {
         ClassLoader modLoader = g_mod_loaders.get(cacheKey);
         if (modLoader == null) {
             try {
-                TransformedJar transformed = jarBytes != null
-                        ? Pipeline.transformPatchJar(jarBytes, packageName)
-                        : Pipeline.transformPatchJar(cacheKey, packageName);
-                modLoader = shouldMergePatchJar(cacheKey, jarBytes)
+                boolean merge = shouldMergePatchJar(cacheKey, jarBytes);
+                byte[] source = jarBytes != null ? jarBytes : java.nio.file.Files.readAllBytes(cacheKey.toRealPath());
+                // Jumpstart fork: a library another mod jar brought in another version gets its own copy
+                ClassClaims.Plan plan = merge ? ClassClaims.plan(cacheKey, packageName, source) : null;
+                if (plan != null && plan.relocates()) {
+                    source = JarRelocator.relocate(source, plan::map);
+                }
+                TransformedJar transformed = Pipeline.transformPatchJar(source, packageName);
+                modLoader = merge
                         ? ModJarInjector.injectMerged(transformed)
                         : ModJarInjector.inject(transformed);
+                if (plan != null) {
+                    ClassClaims.claim(plan);
+                }
                 if (jarBytes == null) {
                     ModJarInjector.serveResources(cacheKey, transformed, modLoader); // Jumpstart fork
                 }

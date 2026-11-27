@@ -275,6 +275,21 @@ sourceSets {
         }
         compileClasspath += main.output
     }
+    // Jumpstart fork: two mods with another version of one library each (see ClassClaims)
+    libclasha {
+        java {
+            srcDirs = ['libclash/a']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
+    libclashb {
+        java {
+            srcDirs = ['libclash/b']
+            include '**/*.java'
+        }
+        compileClasspath += main.output
+    }
     // Jumpstart fork: crash protection and journal tests (see ModGuard, ModJournal)
     hotswapcrash {
         java {
@@ -551,6 +566,16 @@ task hotswapupdateV2Jar(type: Jar) {
     from sourceSets.hotswapupdatev2.output
     dependsOn compileHotswapupdatev2Java
 }
+task libclashAJar(type: Jar) {
+    archiveBaseName.set("libclash-a")
+    from sourceSets.libclasha.output
+    dependsOn compileLibclashaJava
+}
+task libclashBJar(type: Jar) {
+    archiveBaseName.set("libclash-b")
+    from sourceSets.libclashb.output
+    dependsOn compileLibclashbJava
+}
 
 // Jumpstart fork: crash protection and journal test jars
 task hotswapcrashJar(type: Jar) {
@@ -703,6 +728,8 @@ task test_hotswap(type: Test) {
     dependsOn hotswapliveJar
     dependsOn hotswapupdateV1Jar
     dependsOn hotswapupdateV2Jar
+    dependsOn libclashAJar
+    dependsOn libclashBJar
     dependsOn hotswapcrashJar
     dependsOn hotswapcrashliveJar
     dependsOn hotswapmainfailJar
@@ -724,6 +751,8 @@ task test_hotswap(type: Test) {
     systemProperty 'zb.test.hotswapLiveJar', hotswapliveJar.archiveFile.get().asFile.absolutePath
     systemProperty 'zb.test.hotswapUpdateV1Jar', hotswapupdateV1Jar.archiveFile.get().asFile.absolutePath
     systemProperty 'zb.test.hotswapUpdateV2Jar', hotswapupdateV2Jar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.libClashAJar', libclashAJar.archiveFile.get().asFile.absolutePath
+    systemProperty 'zb.test.libClashBJar', libclashBJar.archiveFile.get().asFile.absolutePath
     // Own config dir: the live-load test writes mod_approvals.json there.
     def hotswapConfigDir = layout.buildDirectory.dir("hotswap-config").get().asFile.absolutePath
 

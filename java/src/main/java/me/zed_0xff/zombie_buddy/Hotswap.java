@@ -36,7 +36,7 @@ import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
  *
  * <p>{@link #load} adds a mod jar that was not loaded at start. It only loads a jar whose SHA-256 is
  * approved in mod_approvals.json (written by ZombieBuddy's own prompt, by BiteCheck or by
- * Jumpstart); there is no prompt at runtime. A jar whose classes are already defined, for example
+ * Jumpstart); there is no prompt at runtime. A jar whose own package is already defined, for example
  * a newer version of a mod loaded at start, is refused: its classes would not replace the old ones.
  * {@link #update} handles that case: it switches the old version off and loads the new one with
  * all its classes moved to a fresh package ({@code jsv2.<package>}, {@code jsv3.<package>}, ...).
@@ -75,6 +75,23 @@ public final class Hotswap {
             calls += ModGuard.callsWhileOff(jar);
         }
         return Long.toString(calls);
+    }
+
+    /**
+     * Jumpstart: classes a mod's jars brought that another mod jar had loaded already, with other
+     * contents. One line per other mod, fields separated by tabs: what happened (own-copy: this mod
+     * uses its own copy, moved to another package; required: the other mod is a requirement, its copy
+     * is used; own-package: the clash is in the mod's own package, the other copy is used), the other
+     * mod, the number of classes, one class name, the package prefix of the own copy (or ""). "" if none.
+     */
+    public static synchronized String classClashes(String mod) {
+        StringBuilder sb = new StringBuilder();
+        for (Path jar : resolve(mod)) {
+            for (String line : ClassClaims.clashesOf(jar)) {
+                sb.append(sb.length() > 0 ? "\n" : "").append(line);
+            }
+        }
+        return sb.toString();
     }
 
     /** Lua: switches a mod back on that was switched off with {@link #off}. Returns a one-line result. */
@@ -299,7 +316,7 @@ public final class Hotswap {
 
         String clash;
         try {
-            clash = firstAlreadyDefinedClass(jar);
+            clash = firstAlreadyDefinedClass(jar, packageName);
         } catch (IOException e) {
             return "cannot read jar: " + e.getMessage();
         }
@@ -543,13 +560,22 @@ public final class Hotswap {
     }
 
     /** A class from the jar that the JVM already has, or null. Checks names only, loads nothing. */
-    private static String firstAlreadyDefinedClass(Path jar) throws IOException {
+    /**
+     * A class of the jar's own package that is defined already (another version of the mod). Other
+     * classes a jar brings, libraries for example, may be there already: ClassClaims shares them or
+     * gives the jar its own copy.
+     */
+    private static String firstAlreadyDefinedClass(Path jar, String packageName) throws IOException {
+        String own = packageName + ".";
         Set<String> inJar = new java.util.HashSet<>();
         try (JarFile jf = new JarFile(jar.toFile())) {
             for (JarEntry entry : java.util.Collections.list(jf.entries())) {
                 String name = entry.getName();
                 if (name.endsWith(".class") && !name.startsWith("META-INF/") && !name.endsWith("module-info.class")) {
-                    inJar.add(name.substring(0, name.length() - ".class".length()).replace('/', '.'));
+                    String className = name.substring(0, name.length() - ".class".length()).replace('/', '.');
+                    if (className.startsWith(own)) {
+                        inJar.add(className);
+                    }
                 }
             }
         }

@@ -512,7 +512,7 @@ public final class ModGuard {
         }
     }
 
-    private static String modIdOf(Path jar, String pkg) {
+    static String modIdOf(Path jar, String pkg) {
         if (jar != null && g_jarIds.containsKey(jar)) {
             return g_jarIds.get(jar);
         }
