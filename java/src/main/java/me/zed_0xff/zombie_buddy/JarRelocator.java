@@ -3,6 +3,7 @@ package me.zed_0xff.zombie_buddy;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.function.UnaryOperator;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
@@ -25,10 +26,15 @@ final class JarRelocator {
     static byte[] relocate(byte[] jarBytes, String fromPackage, String toPackage) throws IOException {
         String from = fromPackage.replace('.', '/') + "/";
         String to = toPackage.replace('.', '/') + "/";
+        return relocate(jarBytes, internalName -> internalName.startsWith(from) ? to + internalName.substring(from.length()) : internalName);
+    }
+
+    /** Renames classes by internal name ({@code a/b/C}); {@code map} returns the name unchanged for the others. */
+    static byte[] relocate(byte[] jarBytes, UnaryOperator<String> map) throws IOException {
         Remapper remapper = new Remapper() {
             @Override
             public String map(String internalName) {
-                return internalName.startsWith(from) ? to + internalName.substring(from.length()) : internalName;
+                return map.apply(internalName);
             }
         };
 
