@@ -12,6 +12,9 @@ public class Main {
         Callbacks.beforeLuaInit.register(() -> { });
         WriteTarget.VALUE = "mod";
         WriteTarget.class.getField("REFLECTED").set(null, "mod");
+        WriteTarget.ONE.name = "mod";
+        WriteTarget.ONE.speed = 5;
+        WriteTarget.TWO.speed = 7;
         String file = System.getProperty("zb.test.journalFile");
         if (file != null) {
             Files.writeString(Path.of(file), "written by HotswapJournal");

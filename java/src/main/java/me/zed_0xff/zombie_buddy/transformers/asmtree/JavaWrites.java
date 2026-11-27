@@ -24,6 +24,7 @@ import me.zed_0xff.zombie_buddy.transformers.Pipeline;
  *   <li>{@code PUTSTATIC} into a game class ({@code zombie/}, {@code se/krka/}, {@code fmod/},
  *       {@code astar/}) and {@code Field.set*} calls: {@code ModWrites} keeps the field's original
  *       value and puts it back when the mod is switched off, if nobody changed it since.</li>
+ *   <li>{@code PUTFIELD} into a game class (not in constructors): the same per object.</li>
  *   <li>{@code Files.write*}, {@code newOutputStream}, {@code newBufferedWriter},
  *       {@code new FileOutputStream/FileWriter}: {@code ModIO} logs the path per mod.</li>
  * </ul>
@@ -70,6 +71,10 @@ public class JavaWrites extends AbstractTransformer {
                     "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", false));
                 mn.instructions.insertBefore(fi, hook);
                 changed = true;
+            } else if (insn instanceof FieldInsnNode fi && fi.getOpcode() == Opcodes.PUTFIELD && isGame(fi.owner)
+                    && !fi.owner.equals(cn.name) && !mn.name.equals("<init>")) {
+                extraLocals = Math.max(extraLocals, putField(mn, fi, base, pkg));
+                changed = true;
             } else if (insn instanceof MethodInsnNode mi) {
                 if (mi.getOpcode() == Opcodes.INVOKEVIRTUAL && mi.owner.equals("java/lang/reflect/Field")
                         && mi.name.startsWith("set") && Type.getArgumentTypes(mi.desc).length == 2) {
@@ -92,6 +97,28 @@ public class JavaWrites extends AbstractTransformer {
             mn.maxStack += 6;
         }
         return changed;
+    }
+
+    /** [target, value] -> ModWrites.beforeField(target, boxed value, owner, name, pkg) -> [target, value]. */
+    private static int putField(MethodNode mn, FieldInsnNode fi, int base, String pkg) {
+        Type value = Type.getType(fi.desc);
+        int vSlot = base;
+        int oSlot = base + value.getSize();
+        InsnList hook = new InsnList();
+        hook.add(new VarInsnNode(value.getOpcode(Opcodes.ISTORE), vSlot));
+        hook.add(new VarInsnNode(Opcodes.ASTORE, oSlot));
+        hook.add(new VarInsnNode(Opcodes.ALOAD, oSlot));
+        hook.add(new VarInsnNode(value.getOpcode(Opcodes.ILOAD), vSlot));
+        box(hook, value);
+        hook.add(new LdcInsnNode(fi.owner));
+        hook.add(new LdcInsnNode(fi.name));
+        hook.add(new LdcInsnNode(pkg));
+        hook.add(new MethodInsnNode(Opcodes.INVOKESTATIC, WRITES, "beforeField",
+            "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", false));
+        hook.add(new VarInsnNode(Opcodes.ALOAD, oSlot));
+        hook.add(new VarInsnNode(value.getOpcode(Opcodes.ILOAD), vSlot));
+        mn.instructions.insertBefore(fi, hook);
+        return value.getSize() + 1;
     }
 
     /** [field, target, value] -> ModWrites.beforeFieldSet(field, target, boxed value, pkg) -> [field, target, value]. */
