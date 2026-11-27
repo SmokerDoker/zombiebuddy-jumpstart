@@ -61,6 +61,22 @@ public final class Hotswap {
         return forEachJar(mod, true);
     }
 
+    /**
+     * Calls into a mod's code since it was switched off (every method has the trip wire, which returns
+     * at once and counts): "0" when nothing holds it any more, else the number. "" for an unknown mod.
+     */
+    public static synchronized String callsWhileOff(String mod) {
+        List<Path> jars = resolve(mod);
+        if (jars.isEmpty()) {
+            return "";
+        }
+        long calls = 0;
+        for (Path jar : jars) {
+            calls += ModGuard.callsWhileOff(jar);
+        }
+        return Long.toString(calls);
+    }
+
     /** Lua: switches a mod back on that was switched off with {@link #off}. Returns a one-line result. */
     public static synchronized String on(String mod) {
         return forEachJar(mod, false);
@@ -557,6 +573,7 @@ public final class Hotswap {
                 problem = switchOff(jar);
                 if (problem == null) {
                     ModJournal.undo(jar);
+                    ModGuard.silence(jar); // the trip wire: nothing of it runs while it is off
                 }
             } else {
                 boolean tripped = ModGuard.isTripped(jar);

@@ -65,6 +65,19 @@ public class GuardTest {
             CrashSwitch.enter = false;
             assertTrue(Hotswap.on(mod).startsWith("OK"), "on again");
             assertEquals("vanilla +crash", target.greet());
+
+            // the trip wire in every method: a callback the mod handed out runs while it is on; switched
+            // off by the player, it returns at once, and the call is counted (something still holds the mod)
+            assertEquals("helper", CrashSwitch.helper.get());
+            assertTrue(Hotswap.off(mod).startsWith("OK"), "off");
+            assertEquals("0", Hotswap.callsWhileOff(mod));
+            assertEquals(null, CrashSwitch.helper.get(), "off: its code does not run");
+            assertEquals(null, CrashSwitch.helper.get());
+            assertEquals("2", Hotswap.callsWhileOff(mod));
+            assertEquals("CrashHelper", CrashSwitch.helper.toString(), "toString has no trip wire");
+            assertTrue(Hotswap.on(mod).startsWith("OK"), "on again");
+            assertEquals("helper", CrashSwitch.helper.get(), "on: it runs again");
+            assertEquals("", Hotswap.callsWhileOff("NoSuchMod"));
         } finally {
             CrashSwitch.enter = false;
         }

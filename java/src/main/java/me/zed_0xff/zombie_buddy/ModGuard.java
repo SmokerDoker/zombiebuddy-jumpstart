@@ -141,7 +141,29 @@ public final class ModGuard {
      */
     public static boolean isOff(int id) {
         boolean[] off = g_off;
-        return id >= 0 && id < off.length && off[id];
+        if (id >= 0 && id < off.length && off[id]) {
+            g_offCalls.computeIfAbsent(id, k -> new java.util.concurrent.atomic.LongAdder()).increment();
+            return true;
+        }
+        return false;
+    }
+
+    /** Calls into a mod's code since it was switched off, per trip wire id. */
+    private static final Map<Integer, java.util.concurrent.atomic.LongAdder> g_offCalls = new ConcurrentHashMap<>();
+
+    /**
+     * How often the mod's code was called since it was switched off (and returned at once): more than
+     * 0 means the game or another mod still holds something of it (a callback, a listener, a task).
+     */
+    public static synchronized long callsWhileOff(String pkg) {
+        Integer id = g_ids.get(pkg);
+        java.util.concurrent.atomic.LongAdder calls = id == null ? null : g_offCalls.get(id);
+        return calls == null ? 0 : calls.sum();
+    }
+
+    static long callsWhileOff(Path jar) {
+        String pkg = packageOfJar(jar);
+        return Utils.isBlank(pkg) ? 0 : callsWhileOff(pkg);
     }
 
     private static synchronized void setOff(String pkg, boolean value) {
@@ -149,6 +171,9 @@ public final class ModGuard {
             return;
         }
         int id = idFor(pkg);
+        if (value) {
+            g_offCalls.remove(id); // counted from this switch-off on
+        }
         boolean[] next = Arrays.copyOf(g_off, Math.max(g_off.length, id + 1));
         next[id] = value;
         g_off = next;
