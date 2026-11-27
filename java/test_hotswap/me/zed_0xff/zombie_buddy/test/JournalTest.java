@@ -56,7 +56,18 @@ public class JournalTest {
         assertEquals(callbacksBefore, Callbacks.beforeLuaInit.size());
         assertEquals("orig", WriteTarget.VALUE);
         assertEquals("orig", WriteTarget.REFLECTED);
+        assertEquals("orig", WriteTarget.ONE.name, "instance fields of game objects go back too");
+        assertEquals(1, WriteTarget.ONE.speed);
+        assertEquals(1, WriteTarget.TWO.speed);
 
+        assertEquals("OK " + MOD + " on", Hotswap.on(MOD));
+        assertEquals("mod", WriteTarget.ONE.name);
+        assertEquals(5, WriteTarget.ONE.speed);
+        assertEquals(7, WriteTarget.TWO.speed);
+        WriteTarget.TWO.speed = 3; // the game changes one of them: switching off keeps that
+        assertEquals("OK " + MOD + " off", Hotswap.off(MOD));
+        assertEquals(1, WriteTarget.ONE.speed);
+        assertEquals(3, WriteTarget.TWO.speed);
         assertEquals("OK " + MOD + " on", Hotswap.on(MOD));
         assertEquals("vanilla +journal", target.greet());
         assertTrue(GuardAccess.exposedClasses().contains(API));
